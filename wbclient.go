@@ -23,3 +23,26 @@ type UserAuthResp struct {
 	ErrorMessage string   `json:"errorMessage"`
 	NTHashHash   [16]byte `json:"ntHashHash"`
 }
+
+type DomainJoinReq struct {
+	Domain     string `json:"domain"`
+	Realm      string `json:"realm"`
+	Workgroup  string `json:"workgroup"`
+	DCIP       string `json:"dcIp"`
+	DCName     string `json:"dcName"`
+	ADUsername string `json:"adUsername"`
+	ADPassword string `json:"adPassword"`
+}
+
+type DomainLeaveReq struct {
+	Domain string `json:"domain"`
+}
+
+type DomainRefreshReq struct {
+	Domain string `json:"domain"`
+}
+
+type DomainOpsResp struct {
+	Success      bool   `json:"success"`
+	ErrorMessage string `json:"errorMessage"`
+}

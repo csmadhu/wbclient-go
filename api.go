@@ -12,13 +12,19 @@ import (
 )
 
 const (
-	UserValidate = "samba.user.validate"
-	UserAuth     = "samba.user.auth"
+	UserValidate  = "samba.user.validate"
+	UserAuth      = "samba.user.auth"
+	DomainJoin    = "samba.domain.join"
+	DomainLeave   = "samba.domain.leave"
+	DomainRefresh = "samba.domain.refresh"
 )
 
 func initRoutes(router *mux.Router) {
 	router.HandleFunc(fmt.Sprintf("/%s", UserValidate), createApiHandler(apiUserValidate)).Methods("POST")
 	router.HandleFunc(fmt.Sprintf("/%s", UserAuth), createApiHandler(apiUserAuth)).Methods("POST")
+	router.HandleFunc(fmt.Sprintf("/%s", DomainJoin), createApiHandler(apiDomainJoin)).Methods("POST")
+	router.HandleFunc(fmt.Sprintf("/%s", DomainLeave), createApiHandler(apiDomainLeave)).Methods("POST")
+	router.HandleFunc(fmt.Sprintf("/%s", DomainRefresh), createApiHandler(apiDomainRefresh)).Methods("POST")
 }
 
 func createApiHandler(fn http.HandlerFunc) http.HandlerFunc {
@@ -132,6 +138,68 @@ func apiUserAuth(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
 		log.WithCtx(ctx).Errorf("wbclient(userauth) - send resp err=%v", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+}
+
+func apiDomainJoin(w http.ResponseWriter, r *http.Request) {
+	var req DomainJoinReq
+	ctx := r.Context()
+
+	if err := decodeReq(r.Body, &req); err != nil {
+		log.WithCtx(ctx).Errorf("wbclient(domainjoin) - decode request err=%v", err)
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	var resp DomainOpsResp
+	// run domain join logic/script here.
+	// domain join needs to do a status check first whether the domain is not already joined.
+
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		log.WithCtx(ctx).Errorf("wbclient(domainjoin) - send resp err=%v", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+}
+
+func apiDomainLeave(w http.ResponseWriter, r *http.Request) {
+	var req DomainLeaveReq
+	ctx := r.Context()
+	if err := decodeReq(r.Body, &req); err != nil {
+		log.WithCtx(ctx).Errorf("wbclient(domainleave) - decode request err=%v", err)
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	var resp DomainOpsResp
+	// run domain leave logic/script here.
+
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		log.WithCtx(ctx).Errorf("wbclient(domainleave) - send resp err=%v", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+}
+
+func apiDomainRefresh(w http.ResponseWriter, r *http.Request) {
+	var req DomainRefreshReq
+	ctx := r.Context()
+	if err := decodeReq(r.Body, &req); err != nil {
+		log.WithCtx(ctx).Errorf("wbclient(domainrefresh) - decode request err=%v", err)
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	var resp DomainOpsResp
+	// run domain refresh logic/script here.
+
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		log.WithCtx(ctx).Errorf("wbclient(domainrefresh) - send resp err=%v", err)
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
