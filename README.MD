@@ -264,6 +264,87 @@ Authenticates using MSCHAPv2 challenge and response.
 }
 ```
 
+### 3. Domain Join
+
+**Endpoint:** `POST /samba.domain.join`
+
+Joins the running pod/container to an Active Directory domain by executing
+`scripts/domain-join.sh`. The handler is idempotent — if `net ads testjoin`
+reports a healthy trust, it short-circuits with `{"success": true,
+"errorMessage": "already joined"}` and does not re-run the script.
+
+After a successful join, `winbindd` is running and the
+`/samba.user.validate` / `/samba.user.auth` endpoints can authenticate
+users immediately.
+
+**Request Body:**
+```json
+{
+  "dcfqdn":          "dc.corp.example.com",
+  "netbiosName":     "CORP",
+  "adUsername":      "joiner@corp.example.com",
+  "adPassword":      "AdminPass123!",
+  "passwordTimeout": 30
+}
+```
+
+| Field | Required | Description |
+|---|---|---|
+| `dcfqdn` | Yes | Fully-qualified hostname of the Domain Controller (e.g. `dc.corp.example.com`). The realm is discovered authoritatively via `net ads info -S <dcfqdn>` — pass the AD DNS zone here and the join fails with a clear error. |
+| `netbiosName` | Yes | Short NetBIOS domain name (e.g. `CORP`). |
+| `adUsername` | Yes | AD account allowed to add machines to the domain. Used only at join time; not stored. |
+| `adPassword` | Yes | Password for `adUsername`. |
+| `passwordTimeout` | No | Machine-account password rotation interval, in **days**. Defaults to **30** if omitted or non-positive. The handler converts this to seconds and passes it to the script, which writes it to `smb.conf` as `machine password timeout`. |
+
+**Response:**
+```json
+{
+  "success": true,
+  "errorMessage": ""
+}
+```
+
+`errorMessage` is `"already joined"` on the idempotent short-circuit path,
+or contains the script's failure reason on `HTTP 500`.
+
+### 4. Domain Leave
+
+**Endpoint:** `POST /samba.domain.leave`
+
+Leaves the AD domain by executing `scripts/domain-leave.sh`. Stops
+`winbindd`, runs `net ads leave` to remove the computer account from AD,
+and wipes the persisted `secrets.tdb` / `smb.conf` / `krb5.conf` so the
+container ends in a freshly-provisioned state. Idempotent — if not
+currently joined, returns `{"success": true, "errorMessage": "not joined"}`
+without touching anything.
+
+**Request Body:**
+```json
+{
+  "domain":     "dc.corp.example.com",
+  "adUsername": "joiner@corp.example.com",
+  "adPassword": "AdminPass123!"
+}
+```
+
+| Field | Required | Description |
+|---|---|---|
+| `domain` | No | Informational; preserved in logs for audit clarity. The script reads realm/workgroup from the existing `smb.conf`. |
+| `adUsername` | Yes | AD admin account with permission to delete the computer account. The machine account itself usually can't delete itself, so admin credentials are required. |
+| `adPassword` | Yes | Password for `adUsername`. |
+
+**Response:**
+```json
+{
+  "success": true,
+  "errorMessage": ""
+}
+```
+
+> For the deeper details (script flow, persistence requirements, pod
+> startup behaviour, `smb.conf` / `krb5.conf` flag reference), see
+> [scripts/README.md](scripts/README.md).
+
 ## POST /samba.user.auth — Client Guide
 
 This section is a complete reference for calling the MSCHAPv2 auth endpoint. The caller is responsible for computing `challenge` and `response` using an MSCHAPv2 library before calling this API.

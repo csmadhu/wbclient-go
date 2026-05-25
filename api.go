@@ -6,17 +6,25 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 
 	"github.com/gorilla/mux"
 	"github.com/madhucs/wbclient-go/log"
 )
 
 const (
-	UserValidate  = "samba.user.validate"
-	UserAuth      = "samba.user.auth"
-	DomainJoin    = "samba.domain.join"
-	DomainLeave   = "samba.domain.leave"
-	DomainRefresh = "samba.domain.refresh"
+	defaultDomainJoinScript  = "/usr/src/scripts/domain-join.sh"
+	defaultDomainLeaveScript = "/usr/src/scripts/domain-leave.sh"
+
+	defaultMachinePasswordTimeoutDays = 30
+	secondsPerDay                     = 86400
+)
+
+const (
+	UserValidate = "samba.user.validate"
+	UserAuth     = "samba.user.auth"
+	DomainJoin   = "samba.domain.join"
+	DomainLeave  = "samba.domain.leave"
 )
 
 func initRoutes(router *mux.Router) {
@@ -24,7 +32,6 @@ func initRoutes(router *mux.Router) {
 	router.HandleFunc(fmt.Sprintf("/%s", UserAuth), createApiHandler(apiUserAuth)).Methods("POST")
 	router.HandleFunc(fmt.Sprintf("/%s", DomainJoin), createApiHandler(apiDomainJoin)).Methods("POST")
 	router.HandleFunc(fmt.Sprintf("/%s", DomainLeave), createApiHandler(apiDomainLeave)).Methods("POST")
-	router.HandleFunc(fmt.Sprintf("/%s", DomainRefresh), createApiHandler(apiDomainRefresh)).Methods("POST")
 }
 
 func createApiHandler(fn http.HandlerFunc) http.HandlerFunc {
@@ -153,16 +160,57 @@ func apiDomainJoin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var resp DomainOpsResp
-	// run domain join logic/script here.
-	// domain join needs to do a status check first whether the domain is not already joined.
-
-	w.WriteHeader(http.StatusOK)
-	if err := json.NewEncoder(w).Encode(resp); err != nil {
-		log.WithCtx(ctx).Errorf("wbclient(domainjoin) - send resp err=%v", err)
-		w.WriteHeader(http.StatusInternalServerError)
+	if req.DCFQDN == "" || req.NetbiosName == "" || req.ADUsername == "" || req.ADPassword == "" {
+		log.WithCtx(ctx).Errorf("wbclient(domainjoin) - missing required fields")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(DomainOpsResp{
+			ErrorMessage: "dcfqdn, netbiosName, adUsername and adPassword are all required",
+		})
 		return
 	}
+
+	log.WithCtx(ctx).Printf("wbclient(domainjoin) - request: dcfqdn[%s] netbios[%s] user[%s]",
+		req.DCFQDN, req.NetbiosName, req.ADUsername)
+
+	if err := exec.CommandContext(ctx, "net", "ads", "testjoin").Run(); err == nil {
+		log.WithCtx(ctx).Printf("wbclient(domainjoin) - already joined; skipping script")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(DomainOpsResp{
+			Success:      true,
+			ErrorMessage: "already joined",
+		})
+		return
+	}
+
+	timeoutDays := req.PasswordTimeout
+	if timeoutDays <= 0 {
+		timeoutDays = defaultMachinePasswordTimeoutDays
+	}
+	timeoutSeconds := timeoutDays * secondsPerDay
+
+	cmd := exec.CommandContext(ctx, "bash", defaultDomainJoinScript)
+	cmd.Env = append(os.Environ(),
+		"DC_FQDN="+req.DCFQDN,
+		"NETBIOS_NAME="+req.NetbiosName,
+		"AD_USERNAME="+req.ADUsername,
+		"AD_PASSWORD="+req.ADPassword,
+		fmt.Sprintf("MACHINE_PASSWORD_TIMEOUT=%d", timeoutSeconds),
+	)
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		log.WithCtx(ctx).Errorf("wbclient(domainjoin) - script %s failed err=%v output=%s",
+			defaultDomainJoinScript, err, string(output))
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(DomainOpsResp{
+			ErrorMessage: fmt.Sprintf("domain-join script failed: %v", err),
+		})
+		return
+	}
+
+	log.WithCtx(ctx).Printf("wbclient(domainjoin) - script succeeded")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(DomainOpsResp{Success: true})
 }
 
 func apiDomainLeave(w http.ResponseWriter, r *http.Request) {
@@ -174,33 +222,46 @@ func apiDomainLeave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var resp DomainOpsResp
-	// run domain leave logic/script here.
-
-	w.WriteHeader(http.StatusOK)
-	if err := json.NewEncoder(w).Encode(resp); err != nil {
-		log.WithCtx(ctx).Errorf("wbclient(domainleave) - send resp err=%v", err)
-		w.WriteHeader(http.StatusInternalServerError)
-		return
-	}
-}
-
-func apiDomainRefresh(w http.ResponseWriter, r *http.Request) {
-	var req DomainRefreshReq
-	ctx := r.Context()
-	if err := decodeReq(r.Body, &req); err != nil {
-		log.WithCtx(ctx).Errorf("wbclient(domainrefresh) - decode request err=%v", err)
+	if req.ADUsername == "" || req.ADPassword == "" {
+		log.WithCtx(ctx).Errorf("wbclient(domainleave) - missing required fields")
 		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(DomainOpsResp{
+			ErrorMessage: "adUsername and adPassword are required",
+		})
 		return
 	}
 
-	var resp DomainOpsResp
-	// run domain refresh logic/script here.
+	log.WithCtx(ctx).Printf("wbclient(domainleave) - request: domain[%s] user[%s]",
+		req.Domain, req.ADUsername)
 
-	w.WriteHeader(http.StatusOK)
-	if err := json.NewEncoder(w).Encode(resp); err != nil {
-		log.WithCtx(ctx).Errorf("wbclient(domainrefresh) - send resp err=%v", err)
+	if err := exec.CommandContext(ctx, "net", "ads", "testjoin").Run(); err != nil {
+		log.WithCtx(ctx).Printf("wbclient(domainleave) - not currently joined; nothing to do")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(DomainOpsResp{
+			Success:      true,
+			ErrorMessage: "not joined",
+		})
+		return
+	}
+
+	cmd := exec.CommandContext(ctx, "bash", defaultDomainLeaveScript)
+	cmd.Env = append(os.Environ(),
+		"AD_USERNAME="+req.ADUsername,
+		"AD_PASSWORD="+req.ADPassword,
+	)
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		log.WithCtx(ctx).Errorf("wbclient(domainleave) - script %s failed err=%v output=%s",
+			defaultDomainLeaveScript, err, string(output))
 		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(DomainOpsResp{
+			ErrorMessage: fmt.Sprintf("domain-leave script failed: %v", err),
+		})
 		return
 	}
+
+	log.WithCtx(ctx).Printf("wbclient(domainleave) - script succeeded")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(DomainOpsResp{Success: true})
 }

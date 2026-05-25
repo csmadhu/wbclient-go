@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 
 	"github.com/gorilla/mux"
 	"github.com/madhucs/wbclient-go/log"
@@ -13,9 +14,20 @@ import (
 
 func Start() {
 	validateConfig()
+	restoreWinbindd()
 	router := mux.NewRouter()
 	initRoutes(router)
 	startServer(router)
+}
+
+func restoreWinbindd() {
+	ctx := context.Background()
+	cmd := exec.Command("/usr/sbin/winbindd", "-D")
+	if err := cmd.Run(); err != nil {
+		log.WithCtx(ctx).Printf("wbclient - winbindd not started at boot: %v", err)
+		return
+	}
+	log.WithCtx(ctx).Printf("wbclient - winbindd restored from persisted join state")
 }
 
 func validateConfig() {

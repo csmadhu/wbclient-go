@@ -25,21 +25,17 @@ type UserAuthResp struct {
 }
 
 type DomainJoinReq struct {
-	Domain     string `json:"domain"`
-	Realm      string `json:"realm"`
-	Workgroup  string `json:"workgroup"`
-	DCIP       string `json:"dcIp"`
-	DCName     string `json:"dcName"`
-	ADUsername string `json:"adUsername"`
-	ADPassword string `json:"adPassword"`
+	DCFQDN          string `json:"dcfqdn"`
+	NetbiosName     string `json:"netbiosName"`
+	ADUsername      string `json:"adUsername"`
+	ADPassword      string `json:"adPassword"`
+	PasswordTimeout int    `json:"passwordTimeout,omitempty"`
 }
 
 type DomainLeaveReq struct {
-	Domain string `json:"domain"`
-}
-
-type DomainRefreshReq struct {
-	Domain string `json:"domain"`
+	Domain     string `json:"domain"`
+	ADUsername string `json:"adUsername"`
+	ADPassword string `json:"adPassword"`
 }
 
 type DomainOpsResp struct {
