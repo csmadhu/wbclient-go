@@ -1,19 +1,16 @@
 #!/bin/bash
 
-# Builds the self-contained service image and starts it via docker-compose
-# using docker/service/docker-compose-image.yml (host networking, baked
-# binary, no source mount). The companion compose file for source-mounted
-# iteration is docker/service/docker-compose.yml (driven by
-# scripts/run-service.sh.dev).
+# Dev launcher: builds the service image and starts it via docker-compose.
+# Source is bind-mounted, so the container rebuilds the Go binary on start.
+# Domain join is performed via the API (POST /samba.domain.join), not by this script.
 #
-# Usage: ./run-service.sh --api-token <token> --port <port>
+# Usage: ./scripts/run-service.sh.dev --api-token <token> --port <port>
 
-set -e
+set -e  # Exit on error
 
 CONTAINER_NAME="wbclient-service"
 IMAGE_NAME="wbclient-service-image"
-DOCKERFILE="docker/service/Dockerfile"
-COMPOSE_FILE="docker/service/docker-compose.yml"
+MOUNT_PATH="/usr/src/wbclient"
 API_TOKEN=""
 SERVICE_PORT="8080"
 
@@ -39,11 +36,6 @@ Service options:
 Other options:
     -h, --help          Show this help message
 
-Notes:
-    - Container runs with network_mode: host, so DNS resolution comes from the host.
-    - Persistence of samba/krb5 state is not handled here; mount volumes at
-      the deployment layer (PVC in k8s) if you need join state to survive restarts.
-
 Example:
     $0 --api-token mysecrettoken --port 8080
 EOF
@@ -52,10 +44,21 @@ EOF
 
 while [[ $# -gt 0 ]]; do
     case $1 in
-        --api-token) API_TOKEN="$2"; shift 2 ;;
-        --port)      SERVICE_PORT="$2"; shift 2 ;;
-        -h|--help)   usage ;;
-        *)           print_error "Unknown option: $1"; usage ;;
+        --api-token)
+            API_TOKEN="$2"
+            shift 2
+            ;;
+        --port)
+            SERVICE_PORT="$2"
+            shift 2
+            ;;
+        -h|--help)
+            usage
+            ;;
+        *)
+            print_error "Unknown option: $1"
+            usage
+            ;;
     esac
 done
 
@@ -73,8 +76,8 @@ fi
 
 print_section "STEP 1: BUILDING DOCKER IMAGE"
 print_info "Building image: $IMAGE_NAME"
-print_info "Dockerfile:     $DOCKERFILE"
-docker build -t "$IMAGE_NAME" -f "$DOCKERFILE" .
+print_info "Dockerfile: docker/service/Dockerfile"
+docker build -t "$IMAGE_NAME" -f docker/service/Dockerfile .
 print_info "Image built successfully"
 
 print_section "STEP 2: CHECKING DOCKER COMPOSE"
@@ -87,12 +90,13 @@ else
 fi
 
 print_section "STEP 3: STARTING SERVICE CONTAINER"
-print_info "Compose file: $COMPOSE_FILE"
+print_info "Running: docker-compose up -d"
+print_info "Compose file: ./docker/service/docker-compose.yml"
 
 export WBCLIENT_API_TOKEN="$API_TOKEN"
 export WBCLIENT_PORT="$SERVICE_PORT"
 
-docker-compose -f "$COMPOSE_FILE" up -d
+docker-compose -f ./docker/service/docker-compose.yml up -d
 
 sleep 3
 if ! docker ps --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
@@ -102,13 +106,16 @@ if ! docker ps --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
 fi
 print_info "Container is running"
 
+print_section "STEP 4: VERIFYING CODE MOUNT"
+print_info "Checking if code is mounted at $MOUNT_PATH..."
+docker exec "$CONTAINER_NAME" ls -la "$MOUNT_PATH" >/dev/null 2>&1
+print_info "Code mounted successfully"
+
 print_section "SERVICE RUNNING"
-print_info "Container:    $CONTAINER_NAME"
-print_info "API token:    $API_TOKEN"
-print_info "Port:         $SERVICE_PORT (host network)"
-print_info "Stream logs:  docker logs -f $CONTAINER_NAME"
-print_info "Stop service: docker-compose -f $COMPOSE_FILE down"
-echo ""
-print_info "Sanity check:"
-print_info "  curl -H 'Authorization: $API_TOKEN' -X POST http://localhost:$SERVICE_PORT/samba.domain.join.status"
+print_info "Container:      $CONTAINER_NAME"
+print_info "API token:      $API_TOKEN"
+print_info "Port:           $SERVICE_PORT"
+print_info "Stream logs:    docker logs -f $CONTAINER_NAME"
+print_info "Persisted logs: tail -f ./docs/logs/wbclient.log"
+print_info "Stop service:   docker stop $CONTAINER_NAME"
 echo ""

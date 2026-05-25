@@ -25,11 +25,11 @@ type UserAuthResp struct {
 }
 
 type DomainJoinReq struct {
-	DCFQDN          string `json:"dcfqdn"`
-	NetbiosName     string `json:"netbiosName"`
-	ADUsername      string `json:"adUsername"`
-	ADPassword      string `json:"adPassword"`
-	PasswordTimeout int    `json:"passwordTimeout,omitempty"`
+	DCFQDN                         string `json:"dcfqdn"`
+	NetbiosName                    string `json:"netbiosName"`
+	ADUsername                     string `json:"adUsername"`
+	ADPassword                     string `json:"adPassword"`
+	MachinePasswordRefreshInterval int    `json:"machinePasswordRefreshInterval,omitempty"`
 }
 
 type DomainLeaveReq struct {

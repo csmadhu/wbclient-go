@@ -13,18 +13,20 @@ import (
 )
 
 const (
-	defaultDomainJoinScript  = "/usr/src/scripts/domain-join.sh"
-	defaultDomainLeaveScript = "/usr/src/scripts/domain-leave.sh"
+	defaultDomainJoinScript       = "/usr/src/wbclient/scripts/domain-join.sh"
+	defaultDomainLeaveScript      = "/usr/src/wbclient/scripts/domain-leave.sh"
+	defaultDomainJoinStatusScript = "/usr/src/wbclient/scripts/domain-join-status.sh"
 
 	defaultMachinePasswordTimeoutDays = 30
 	secondsPerDay                     = 86400
 )
 
 const (
-	UserValidate = "samba.user.validate"
-	UserAuth     = "samba.user.auth"
-	DomainJoin   = "samba.domain.join"
-	DomainLeave  = "samba.domain.leave"
+	UserValidate     = "samba.user.validate"
+	UserAuth         = "samba.user.auth"
+	DomainJoin       = "samba.domain.join"
+	DomainLeave      = "samba.domain.leave"
+	DomainJoinStatus = "samba.domain.join.status"
 )
 
 func initRoutes(router *mux.Router) {
@@ -32,6 +34,7 @@ func initRoutes(router *mux.Router) {
 	router.HandleFunc(fmt.Sprintf("/%s", UserAuth), createApiHandler(apiUserAuth)).Methods("POST")
 	router.HandleFunc(fmt.Sprintf("/%s", DomainJoin), createApiHandler(apiDomainJoin)).Methods("POST")
 	router.HandleFunc(fmt.Sprintf("/%s", DomainLeave), createApiHandler(apiDomainLeave)).Methods("POST")
+	router.HandleFunc(fmt.Sprintf("/%s", DomainJoinStatus), createApiHandler(apiDomainJoinStatus)).Methods("POST")
 }
 
 func createApiHandler(fn http.HandlerFunc) http.HandlerFunc {
@@ -182,7 +185,7 @@ func apiDomainJoin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	timeoutDays := req.PasswordTimeout
+	timeoutDays := req.MachinePasswordRefreshInterval
 	if timeoutDays <= 0 {
 		timeoutDays = defaultMachinePasswordTimeoutDays
 	}
@@ -263,5 +266,25 @@ func apiDomainLeave(w http.ResponseWriter, r *http.Request) {
 
 	log.WithCtx(ctx).Printf("wbclient(domainleave) - script succeeded")
 	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(DomainOpsResp{Success: true})
+}
+
+func apiDomainJoinStatus(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	cmd := exec.CommandContext(ctx, "bash", defaultDomainJoinStatusScript)
+	output, err := cmd.CombinedOutput()
+
+	w.WriteHeader(http.StatusOK)
+	if err != nil {
+		log.WithCtx(ctx).Printf("wbclient(domainjoinstatus) - wbinfo -t failed err=%v output=%s",
+			err, string(output))
+		json.NewEncoder(w).Encode(DomainOpsResp{
+			ErrorMessage: fmt.Sprintf("wbinfo -t failed: %v: %s", err, string(output)),
+		})
+		return
+	}
+
+	log.WithCtx(ctx).Printf("wbclient(domainjoinstatus) - wbinfo -t ok")
 	json.NewEncoder(w).Encode(DomainOpsResp{Success: true})
 }

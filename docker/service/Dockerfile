@@ -42,8 +42,12 @@ ENV CGO_ENABLED=1
 
 RUN samba -V && go version
 
-COPY docker/setup-samba-member.sh /setup-samba-member.sh
-COPY docker/service/entrypoint.sh /entrypoint.sh
-RUN chmod +x /setup-samba-member.sh /entrypoint.sh
+WORKDIR /usr/src/wbclient
 
-CMD ["/entrypoint.sh"]
+COPY . .
+
+RUN go mod download \
+ && chmod +x scripts/*.sh docker/service/entrypoint.sh \
+ && go build -buildvcs=false -o /usr/local/bin/wbclient ./cmd/wbclient
+
+CMD ["/usr/src/wbclient/docker/service/entrypoint.sh"]

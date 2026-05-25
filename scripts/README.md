@@ -105,7 +105,7 @@ pod is back to an unjoined state.
 | `ntlm auth` | `yes` | Enables NTLM-family auth path. The service's MSCHAPv2 flow (`wbcAuthenticateUserEx` with NT-Response) needs this. Modern Samba defaults disable plain NTLM for security; we re-enable explicitly. | **Mandatory** |
 | `client ntlmv2 auth` | `yes` | Forces NTLMv2 (not the legacy NTLMv1) when Samba initiates NTLM. Belt-and-suspenders alongside `ntlm auth`. | **Mandatory** |
 | `winbind use default domain` | `yes` | Lets callers pass `alice` instead of `CORP\alice` to `wbinfo`/`wbcAuthenticateUserEx`. Improves caller ergonomics. | Nice-to-have |
-| `machine password timeout` | `${MACHINE_PASSWORD_TIMEOUT:-2592000}` (script reads the env var; default 2592000s = 30 days) | How often `winbindd` rotates the long-term machine password against AD. The value is supplied by the caller through the `passwordTimeout` field of `DomainJoinReq` (in days). If the request omits it, `apiDomainJoin` defaults to 30 days; if the script is invoked directly without the env var, the same 30-day default applies. | Nice-to-have / caller-tunable |
+| `machine password timeout` | `${MACHINE_PASSWORD_TIMEOUT:-2592000}` (script reads the env var; default 2592000s = 30 days) | How often `winbindd` rotates the long-term machine password against AD. The value is supplied by the caller through the `machinePasswordRefreshInterval` field of `DomainJoinReq` (in days). If the request omits it, `apiDomainJoin` defaults to 30 days; if the script is invoked directly without the env var, the same 30-day default applies. | Nice-to-have / caller-tunable |
 
 ## `krb5.conf` flag reference
 
@@ -194,6 +194,19 @@ stable hostname) or a single-replica `Deployment` with an explicit
 
 ## Pod requirements for production deployment
 
+The production image is built from `docker/service/Dockerfile`. **The build
+context must be the repository root**, not `docker/service/` — the Dockerfile
+does a single `COPY . .` that pulls in `go.mod`, the Go sources, the
+`scripts/` directory, and the entrypoint. Build it as:
+
+```bash
+docker build -t wbclient-service-image -f docker/service/Dockerfile .
+```
+
+The trailing `.` is the build context — it must be the project root, with
+the Dockerfile pointed at via `-f`. Building from inside `docker/service/`
+will fail because most of the tree isn't visible to the daemon.
+
 The wbclient-go service exposes two domain-lifecycle endpoints:
 
 - **`POST /samba.domain.join`** → `apiDomainJoin` → `scripts/domain-join.sh`
@@ -206,11 +219,11 @@ A typical production workflow:
    body matching `DomainJoinReq`:
    ```json
    {
-     "dcfqdn":          "dc.corp.example.com",
-     "netbiosName":     "CORP",
-     "adUsername":      "joiner@corp.example.com",
-     "adPassword":      "...",
-     "passwordTimeout": 30
+     "dcfqdn":                         "dc.corp.example.com",
+     "netbiosName":                    "CORP",
+     "adUsername":                     "joiner@corp.example.com",
+     "adPassword":                     "...",
+     "machinePasswordRefreshInterval": 30
    }
    ```
    The handler translates these to the env vars `domain-join.sh` expects
@@ -218,7 +231,7 @@ A typical production workflow:
    `MACHINE_PASSWORD_TIMEOUT`), runs the script, and returns
    `DomainOpsResp`.
 
-   **`passwordTimeout`** is optional. It is interpreted in **days** and
+   **`machinePasswordRefreshInterval`** is optional. It is interpreted in **days** and
    the handler converts it to seconds before passing it to the script as
    `MACHINE_PASSWORD_TIMEOUT` — which becomes the
    `machine password timeout` setting in `smb.conf` (how often

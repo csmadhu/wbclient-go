@@ -28,24 +28,23 @@ wbclient-go is a Go wrapper around libwbclient (Samba Winbind client library) th
 
 ## Quick Start
 
-### Deploy as Production Service (Easiest)
+### Run the Service (dev / test)
+
+`run-service.sh` and `scripts/run-service.sh.dev` both build the image and
+start the container via `docker/service/docker-compose.yml`. They are dev
+and test conveniences — for production, build the image from
+`docker/service/Dockerfile` and run it on your orchestrator (see
+[scripts/README.md](scripts/README.md) for pod requirements).
+
+Domain join is now an API call (`POST /samba.domain.join`), not a script
+flag.
 
 ```bash
-# Run the service with automatic domain join
-./run-service.sh \
-  --ad-username admin \
-  --ad-password "YourAdminPass" \
-  --domain-name corp.example.com \
-  --dc-ip 10.0.1.100 \
-  --dc-hostname dc.corp.example.com \
-  --workgroup CORP \
-  --realm CORP.EXAMPLE.COM \
-  --api-token "your-secure-token" \
-  --port 8080
+# Start the service
+./run-service.sh --api-token "your-secure-token" --port 8080
 
-# The service is now running at http://localhost:8080
-# View logs: docker logs -f wbclient-service
-# Persisted logs: tail -f ./docs/logs/wbclient.log
+# Service available at http://localhost:8080
+# View logs:      docker logs -f wbclient-service
 ```
 
 ### Test API with curl
@@ -81,10 +80,10 @@ wbclient-go/
 │   └── wbclient/          # Main application entry point
 │       └── main.go
 ├── docker/                # Docker configuration
-│   ├── service/           # Production service Docker files
-│   │   ├── Dockerfile     # Service container image
-│   │   ├── docker-compose.yml  # Service orchestration
-│   │   └── entrypoint.sh  # Service startup script
+│   ├── service/           # Service Docker files
+│   │   ├── Dockerfile     # Builds the service image (production-ready)
+│   │   ├── docker-compose.yml  # Dev/test orchestration for the image
+│   │   └── entrypoint.sh  # Container startup (runs the binary)
 │   ├── test/              # Test environment Docker files
 │   │   ├── Dockerfile     # Test container image
 │   │   └── docker-compose.yml  # Test orchestration
@@ -103,7 +102,7 @@ wbclient-go/
 ├── wbclient.go           # Request/response types
 ├── go.mod                # Go module dependencies
 ├── run-auth-tests.sh     # Automated test runner script
-└── run-service.sh        # Production service runner script
+└── run-service.sh        # Dev/test service runner (builds + brings up the image via docker-compose)
 ```
 
 ## Prerequisites
@@ -147,7 +146,7 @@ CGO_ENABLED=1 go build -o wbclient ./cmd/wbclient
 
 The service is configured via environment variables.
 
-### Required Environment Variables (Production)
+### Required Environment Variables
 
 | Variable | Description | Example |
 |----------|-------------|---------|
@@ -164,7 +163,7 @@ The service is configured via environment variables.
 
 ## Running the Service
 
-### As HTTP Server (Production Mode)
+### As HTTP Server
 
 Set required environment variables and run:
 
@@ -338,6 +337,45 @@ without touching anything.
 {
   "success": true,
   "errorMessage": ""
+}
+```
+
+### 5. Domain Join Status
+
+**Endpoint:** `POST /samba.domain.join.status`
+
+Reports whether the container currently has a healthy AD trust by running
+`wbinfo -t` (via `scripts/domain-join-status.sh`) and surfacing the exit
+code. No request body required.
+
+A `success: true` response means winbind handshaked the DC successfully
+and the auth endpoints are ready to serve traffic. `success: false` means
+either the pod has not been joined yet, `winbindd` is not running, or the
+machine credential is invalid — the `errorMessage` contains the
+underlying `wbinfo -t` output for diagnosis.
+
+Always returns HTTP 200 — the health verdict is in the body, not the
+status line. Use it as a readiness probe.
+
+**Request:**
+```bash
+curl -X POST http://localhost:8080/samba.domain.join.status \
+  -H "Authorization: your-secure-token"
+```
+
+**Response (healthy):**
+```json
+{
+  "success": true,
+  "errorMessage": ""
+}
+```
+
+**Response (not joined / winbind down):**
+```json
+{
+  "success": false,
+  "errorMessage": "wbinfo -t failed: exit status 1: ..."
 }
 ```
 
@@ -598,55 +636,43 @@ curl -X POST http://localhost:8080/samba.user.validate \
 
 The repository includes two main automation scripts for different use cases:
 
-### 1. `run-service.sh` - Production Service Runner
+### 1. `run-service.sh` — Dev/Test Service Runner
 
-This script sets up and runs wbclient as a production service in Docker with automatic domain join and logging.
+Builds the service image (`docker/service/Dockerfile`) and starts the
+container via `docker/service/docker-compose.yml`. It is a dev/test
+convenience — production deployments build the same Dockerfile and run
+the resulting image on their own orchestrator (k8s, etc.).
 
-**Purpose:** Deploy wbclient-go as a long-running production service with proper domain integration.
+Domain join is performed at runtime by calling `POST /samba.domain.join`
+against the running service; the script does not take AD credentials.
 
 **What it does:**
-1. Builds the service Docker image (`docker/service/Dockerfile`)
-2. Starts the container with docker-compose
-3. Automatically joins the Active Directory domain
-4. Compiles the wbclient binary inside the container
-5. Starts the HTTP service
-6. Persists logs to `./docs/logs/wbclient.log`
+1. Removes any pre-existing `wbclient-service` container
+2. `docker build -t wbclient-service-image -f docker/service/Dockerfile .`
+3. `docker-compose -f docker/service/docker-compose.yml up -d`
+4. Reports the container status and a sanity-check curl
 
 **Usage:**
 
 ```bash
-./run-service.sh \
-  --ad-username adminuser \
-  --ad-password "AdminPass456" \
-  --domain-name testdomain.local \
-  --dc-ip 10.0.1.100 \
-  --dc-hostname dc.testdomain.local \
-  --workgroup TESTDOMAIN \
-  --realm TESTDOMAIN.LOCAL \
-  --api-token "your-secure-token" \
-  --port 8080
+./run-service.sh --api-token "your-secure-token" --port 8080
 ```
 
-**All Options:**
+**Options:**
 
 | Flag | Description | Required | Default |
 |------|-------------|----------|---------|
-| `--ad-username` | AD admin username for domain join | Yes | - |
-| `--ad-password` | AD admin password | Yes | - |
-| `--domain-name` | Full domain name (e.g., testdomain.local) | Yes | - |
-| `--dc-ip` | Domain Controller IP address | Yes | - |
-| `--dc-hostname` | Domain Controller FQDN | Yes | - |
-| `--workgroup` | NetBIOS workgroup name | Yes | - |
-| `--realm` | Kerberos realm (uppercase) | Yes | - |
 | `--api-token` | API token for WBCLIENT_API_TOKEN | No | `secret` |
 | `--port` | Service port | No | `8080` |
 | `-h, --help` | Show help message | No | - |
 
+`scripts/run-service.sh.dev` is the same script intended for iterating on
+the bind-mounted source tree via the same compose file.
+
 **After running:**
 - Service is available at `http://localhost:8080` (or your configured port)
 - View logs: `docker logs -f wbclient-service`
-- Persisted logs: `tail -f ./docs/logs/wbclient.log`
-- Stop service: `docker stop wbclient-service`
+- Stop service: `docker-compose -f docker/service/docker-compose.yml down`
 
 ### 2. `run-auth-tests.sh` - Automated Test Runner
 
@@ -710,44 +736,41 @@ This keeps the container running so you can debug issues or run additional tests
 
 ## Docker Setup
 
-The project includes two Docker setups: one for running the service in production and one for running tests.
+The project includes two Docker setups: one for the service and one for the test suite.
 
-### Running as Production Service (Recommended)
+### Building the Production Image
 
-The easiest way to run wbclient as a production service is using the `run-service.sh` script, which automatically:
-- Builds the Docker image
-- Joins the domain
-- Compiles and starts the service
-- Persists logs to `./docs/logs/wbclient.log`
-
-**Usage:**
+The production-ready image is built from `docker/service/Dockerfile`. **The
+build context must be the project root** (the `.` at the end):
 
 ```bash
-./run-service.sh \
-  --ad-username adminuser \
-  --ad-password "AdminPass456" \
-  --domain-name testdomain.local \
-  --dc-ip 10.0.1.100 \
-  --dc-hostname dc.testdomain.local \
-  --workgroup TESTDOMAIN \
-  --realm TESTDOMAIN.LOCAL \
-  --api-token "your-secure-token" \
-  --port 8080
+docker build -t wbclient-service-image -f docker/service/Dockerfile .
+```
+
+The Dockerfile bakes the source and the compiled binary, and its `CMD`
+runs `docker/service/entrypoint.sh`. Run it on your orchestrator with
+the required env vars (`WBCLIENT_API_TOKEN`, `WBCLIENT_PORT`) and an
+appropriate persistence story for `/var/lib/samba/private/` — see
+[scripts/README.md](scripts/README.md) for pod requirements.
+
+### Running Locally for Dev/Test
+
+`docker/service/docker-compose.yml` is the dev/test orchestration for the
+same image. Use `./run-service.sh` (or `scripts/run-service.sh.dev`) to
+build the image and bring the container up:
+
+```bash
+./run-service.sh --api-token "your-secure-token" --port 8080
 ```
 
 **Script Options:**
 
 | Flag | Description | Required | Default |
 |------|-------------|----------|---------|
-| `--ad-username` | AD admin username for domain join | Yes | - |
-| `--ad-password` | AD admin password | Yes | - |
-| `--domain-name` | Full domain name (e.g., testdomain.local) | Yes | - |
-| `--dc-ip` | Domain Controller IP address | Yes | - |
-| `--dc-hostname` | Domain Controller FQDN | Yes | - |
-| `--workgroup` | NetBIOS workgroup name | Yes | - |
-| `--realm` | Kerberos realm (uppercase) | Yes | - |
 | `--api-token` | API token for WBCLIENT_API_TOKEN | No | `secret` |
 | `--port` | Service port for WBCLIENT_PORT | No | `8080` |
+
+Domain join is performed at runtime via `POST /samba.domain.join`.
 
 **Managing the Service:**
 
