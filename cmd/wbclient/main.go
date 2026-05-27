@@ -1,6 +1,6 @@
 package main
 
-import wbclientgo "github.com/csmadhu/wbclient-go/v1"
+import wbclientgo "github.com/csmadhu/wbclient-go"
 
 func main() {
 	wbclientgo.Start()
