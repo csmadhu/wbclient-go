@@ -1,4 +1,4 @@
-module github.com/csmadhu/wbclient-go/v1
+module github.com/csmadhu/wbclient-go
 
 go 1.26.3
 
