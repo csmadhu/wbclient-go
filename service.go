@@ -9,7 +9,7 @@ import (
 	"os/exec"
 
 	"github.com/gorilla/mux"
-	"github.com/madhucs/wbclient-go/v1/log"
+	"github.com/csmadhu/wbclient-go/v1/log"
 )
 
 func Start() {
