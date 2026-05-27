@@ -165,7 +165,7 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/madhucs/wbclient-go/log"
+	"github.com/madhucs/wbclient-go/v1/log"
 )
 
 const (
