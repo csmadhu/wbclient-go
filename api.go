@@ -9,7 +9,7 @@ import (
 	"os/exec"
 
 	"github.com/gorilla/mux"
-	"github.com/madhucs/wbclient-go/log"
+	"github.com/madhucs/wbclient-go/v1/log"
 )
 
 const (
