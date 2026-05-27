@@ -1,4 +1,4 @@
-module github.com/madhucs/wbclient-go/v3
+module github.com/madhucs/wbclient-go/v1
 
 go 1.26.3
 
