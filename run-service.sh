@@ -1,21 +1,19 @@
 #!/bin/bash
 
-# Builds the self-contained service image and starts it via docker-compose
-# using docker/service/docker-compose-image.yml (host networking, baked
-# binary, no source mount). The companion compose file for source-mounted
-# iteration is docker/service/docker-compose.yml (driven by
-# scripts/run-service.sh.dev).
+# Builds the service image and starts it via docker run with DNS pointed
+# at the Domain Controller for AD resolution.
 #
-# Usage: ./run-service.sh --api-token <token> --port <port>
+# Usage: ./run-service.sh --dc-ip <ip> --domain-name <domain> [--api-token <token>] [--port <port>]
 
 set -e
 
 CONTAINER_NAME="wbclient-service"
 IMAGE_NAME="wbclient-service-image"
 DOCKERFILE="docker/service/Dockerfile"
-COMPOSE_FILE="docker/service/docker-compose.yml"
 API_TOKEN=""
 SERVICE_PORT="8080"
+DC_IP=""
+DOMAIN_NAME=""
 
 print_section() {
     echo ""
@@ -32,6 +30,10 @@ usage() {
     cat <<EOF
 Usage: $0 [OPTIONS]
 
+Required options:
+    --dc-ip             IP address of the Domain Controller (used for container DNS)
+    --domain-name       DNS domain name for search suffix (e.g. corp.example.com)
+
 Service options:
     --api-token         API token for WBCLIENT_API_TOKEN (default: secret)
     --port              Service port for WBCLIENT_PORT (default: 8080)
@@ -40,24 +42,31 @@ Other options:
     -h, --help          Show this help message
 
 Notes:
-    - Container runs with network_mode: host, so DNS resolution comes from the host.
+    - Container uses --dns and --dns-search pointed at the DC for AD resolution.
     - Persistence of samba/krb5 state is not handled here; mount volumes at
       the deployment layer (PVC in k8s) if you need join state to survive restarts.
 
 Example:
-    $0 --api-token mysecrettoken --port 8080
+    $0 --dc-ip 10.0.0.5 --domain-name corp.example.com --api-token mysecrettoken --port 8080
 EOF
     exit 1
 }
 
 while [[ $# -gt 0 ]]; do
     case $1 in
-        --api-token) API_TOKEN="$2"; shift 2 ;;
-        --port)      SERVICE_PORT="$2"; shift 2 ;;
-        -h|--help)   usage ;;
-        *)           print_error "Unknown option: $1"; usage ;;
+        --dc-ip)      DC_IP="$2"; shift 2 ;;
+        --domain-name) DOMAIN_NAME="$2"; shift 2 ;;
+        --api-token)  API_TOKEN="$2"; shift 2 ;;
+        --port)       SERVICE_PORT="$2"; shift 2 ;;
+        -h|--help)    usage ;;
+        *)            print_error "Unknown option: $1"; usage ;;
     esac
 done
+
+if [[ -z "$DC_IP" || -z "$DOMAIN_NAME" ]]; then
+    print_error "--dc-ip and --domain-name are required"
+    usage
+fi
 
 API_TOKEN="${API_TOKEN:-secret}"
 
@@ -77,22 +86,28 @@ print_info "Dockerfile:     $DOCKERFILE"
 docker build -t "$IMAGE_NAME" -f "$DOCKERFILE" .
 print_info "Image built successfully"
 
-print_section "STEP 2: CHECKING DOCKER COMPOSE"
-if ! command -v docker-compose &>/dev/null; then
-    print_info "docker-compose not found, installing via apt-get..."
-    apt-get update -qq && apt-get install -y -qq docker-compose
-    print_info "docker-compose installed: $(docker-compose version)"
-else
-    print_info "docker-compose found: $(docker-compose version)"
-fi
+print_section "STEP 2: STARTING SERVICE CONTAINER"
+print_info "DC IP:        $DC_IP"
+print_info "Domain:       $DOMAIN_NAME"
 
-print_section "STEP 3: STARTING SERVICE CONTAINER"
-print_info "Compose file: $COMPOSE_FILE"
-
-export WBCLIENT_API_TOKEN="$API_TOKEN"
-export WBCLIENT_PORT="$SERVICE_PORT"
-
-docker-compose -f "$COMPOSE_FILE" up -d
+docker run -d \
+    --name "$CONTAINER_NAME" \
+    -p "$SERVICE_PORT:$SERVICE_PORT" \
+    --dns "$DC_IP" \
+    --dns-search "$DOMAIN_NAME" \
+    -v "$(pwd):/usr/src/wbclient" \
+    -v "go-modules-svc:/root/go/pkg/mod" \
+    -v "go-cache-svc:/root/.cache" \
+    -v "/sys/fs/cgroup:/sys/fs/cgroup:rw" \
+    -v "/etc/localtime:/etc/localtime:ro" \
+    --privileged \
+    -e "WBCLIENT_API_TOKEN=$API_TOKEN" \
+    -e "WBCLIENT_PORT=$SERVICE_PORT" \
+    -t \
+    --stop-signal SIGRTMIN+3 \
+    --tmpfs /run \
+    --tmpfs /run/lock \
+    "$IMAGE_NAME"
 
 sleep 3
 if ! docker ps --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
@@ -105,9 +120,10 @@ print_info "Container is running"
 print_section "SERVICE RUNNING"
 print_info "Container:    $CONTAINER_NAME"
 print_info "API token:    $API_TOKEN"
-print_info "Port:         $SERVICE_PORT (host network)"
+print_info "Port:         $SERVICE_PORT"
+print_info "DNS:          $DC_IP (search: $DOMAIN_NAME)"
 print_info "Stream logs:  docker logs -f $CONTAINER_NAME"
-print_info "Stop service: docker-compose -f $COMPOSE_FILE down"
+print_info "Stop service: docker stop $CONTAINER_NAME && docker rm $CONTAINER_NAME"
 echo ""
 print_info "Sanity check:"
 print_info "  curl -H 'Authorization: $API_TOKEN' -X POST http://localhost:$SERVICE_PORT/samba.domain.join.status"

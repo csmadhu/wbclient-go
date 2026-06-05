@@ -210,7 +210,7 @@ docker exec \
     -e TEST_PASSWORD="$PASSWORD" \
     -e TEST_DOMAIN="$DOMAIN" \
     "$CONTAINER_NAME" \
-    sh -c "cd $MOUNT_PATH && CGO_ENABLED=1 go test -v -run ."
+    sh -c "cd $MOUNT_PATH && CGO_ENABLED=1 go test -v ./internal/..."
 
 TEST_EXIT_CODE=$?
 

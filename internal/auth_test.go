@@ -1,21 +1,19 @@
-package wbclientgo
+package internal
 
 import (
 	"context"
 	"fmt"
 	"os"
 	"testing"
+
+	wbclientgo "github.com/csmadhu/wbclient-go"
 )
 
-// TestAuthWithPlainText tests plain text authentication
-// Subtests: correct password, wrong password, wrong username
 func TestAuthWithPlainText(t *testing.T) {
-	// Get test credentials from environment variables
 	username := os.Getenv("TEST_USERNAME")
 	domain := os.Getenv("TEST_DOMAIN")
 	password := os.Getenv("TEST_PASSWORD")
 
-	// Skip test if environment variables are not set
 	if username == "" || domain == "" || password == "" {
 		t.Skip("Skipping TestAuthWithPlainText: TEST_USERNAME, TEST_DOMAIN, and TEST_PASSWORD environment variables must be set")
 	}
@@ -23,7 +21,7 @@ func TestAuthWithPlainText(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("CorrectPassword", func(t *testing.T) {
-		req := UserValidateReq{
+		req := wbclientgo.UserValidateReq{
 			Username:        username,
 			Password:        password,
 			Domain:          domain,
@@ -43,7 +41,7 @@ func TestAuthWithPlainText(t *testing.T) {
 	})
 
 	t.Run("WrongPassword", func(t *testing.T) {
-		req := UserValidateReq{
+		req := wbclientgo.UserValidateReq{
 			Username:        username,
 			Password:        fmt.Sprintf("wrong%s", password),
 			Domain:          domain,
@@ -66,7 +64,7 @@ func TestAuthWithPlainText(t *testing.T) {
 	})
 
 	t.Run("WrongUsername", func(t *testing.T) {
-		req := UserValidateReq{
+		req := wbclientgo.UserValidateReq{
 			Username:        fmt.Sprintf("wrong%s", username),
 			Password:        password,
 			Domain:          domain,
@@ -89,15 +87,11 @@ func TestAuthWithPlainText(t *testing.T) {
 	})
 }
 
-// TestAuthWithChallenge tests MSCHAPv2 authentication
-// Subtests: correct password, wrong password, wrong username
 func TestAuthWithChallenge(t *testing.T) {
-	// Get test credentials from environment variables
 	username := os.Getenv("TEST_USERNAME")
 	domain := os.Getenv("TEST_DOMAIN")
 	password := os.Getenv("TEST_PASSWORD")
 
-	// Skip test if environment variables are not set
 	if username == "" || domain == "" || password == "" {
 		t.Skip("Skipping TestAuthWithChallenge: TEST_USERNAME, TEST_DOMAIN, and TEST_PASSWORD environment variables must be set")
 	}
@@ -105,7 +99,7 @@ func TestAuthWithChallenge(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("CorrectPassword", func(t *testing.T) {
-		req := UserValidateReq{
+		req := wbclientgo.UserValidateReq{
 			Username:        username,
 			Password:        password,
 			Domain:          domain,
@@ -125,7 +119,7 @@ func TestAuthWithChallenge(t *testing.T) {
 	})
 
 	t.Run("WrongPassword", func(t *testing.T) {
-		req := UserValidateReq{
+		req := wbclientgo.UserValidateReq{
 			Username:        username,
 			Password:        "WrongPassword123!",
 			Domain:          domain,
@@ -148,7 +142,7 @@ func TestAuthWithChallenge(t *testing.T) {
 	})
 
 	t.Run("WrongUsername", func(t *testing.T) {
-		req := UserValidateReq{
+		req := wbclientgo.UserValidateReq{
 			Username:        "nonexistentuser",
 			Password:        password,
 			Domain:          domain,

@@ -1,5 +1,13 @@
 package wbclientgo
 
+const (
+	UserValidate     = "samba.user.validate"
+	UserAuth         = "samba.user.auth"
+	DomainJoin       = "samba.domain.join"
+	DomainLeave      = "samba.domain.leave"
+	DomainJoinStatus = "samba.domain.join.status"
+)
+
 // UserValidateReq represents the request for test authentication
 type UserValidateReq struct {
 	Username        string `json:"username"`

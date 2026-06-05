@@ -1,4 +1,4 @@
-package wbclientgo
+package internal
 
 import (
 	"encoding/json"
@@ -8,8 +8,9 @@ import (
 	"os"
 	"os/exec"
 
-	"github.com/gorilla/mux"
+	wbclientgo "github.com/csmadhu/wbclient-go"
 	"github.com/csmadhu/wbclient-go/log"
+	"github.com/gorilla/mux"
 )
 
 const (
@@ -21,20 +22,12 @@ const (
 	secondsPerDay                     = 86400
 )
 
-const (
-	UserValidate     = "samba.user.validate"
-	UserAuth         = "samba.user.auth"
-	DomainJoin       = "samba.domain.join"
-	DomainLeave      = "samba.domain.leave"
-	DomainJoinStatus = "samba.domain.join.status"
-)
-
 func initRoutes(router *mux.Router) {
-	router.HandleFunc(fmt.Sprintf("/%s", UserValidate), createApiHandler(apiUserValidate)).Methods("POST")
-	router.HandleFunc(fmt.Sprintf("/%s", UserAuth), createApiHandler(apiUserAuth)).Methods("POST")
-	router.HandleFunc(fmt.Sprintf("/%s", DomainJoin), createApiHandler(apiDomainJoin)).Methods("POST")
-	router.HandleFunc(fmt.Sprintf("/%s", DomainLeave), createApiHandler(apiDomainLeave)).Methods("POST")
-	router.HandleFunc(fmt.Sprintf("/%s", DomainJoinStatus), createApiHandler(apiDomainJoinStatus)).Methods("POST")
+	router.HandleFunc(fmt.Sprintf("/%s", wbclientgo.UserValidate), createApiHandler(apiUserValidate)).Methods("POST")
+	router.HandleFunc(fmt.Sprintf("/%s", wbclientgo.UserAuth), createApiHandler(apiUserAuth)).Methods("POST")
+	router.HandleFunc(fmt.Sprintf("/%s", wbclientgo.DomainJoin), createApiHandler(apiDomainJoin)).Methods("POST")
+	router.HandleFunc(fmt.Sprintf("/%s", wbclientgo.DomainLeave), createApiHandler(apiDomainLeave)).Methods("POST")
+	router.HandleFunc(fmt.Sprintf("/%s", wbclientgo.DomainJoinStatus), createApiHandler(apiDomainJoinStatus)).Methods("POST")
 }
 
 func createApiHandler(fn http.HandlerFunc) http.HandlerFunc {
@@ -47,7 +40,6 @@ func createApiHandler(fn http.HandlerFunc) http.HandlerFunc {
 
 		log.WithCtx(ctx).Printf("wbclient - process url[%s]", r.URL)
 
-		// get authorization token
 		token := r.Header.Get("Authorization")
 		if apiToken := os.Getenv("WBCLIENT_API_TOKEN"); apiToken != "" && apiToken != token {
 			w.WriteHeader(http.StatusUnauthorized)
@@ -60,8 +52,6 @@ func createApiHandler(fn http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-// Example: "X_WBCLIENT_REQ_META: {"request_id":"dummy-request-123","correlation_id":"dummy-corr-456", "session_id":"dummy-session-789","client_version":"1.0.0","user_agent":"curl-test"}"
-// Return []string{"key1", "value1", "key2", "value2", ...}
 func fetchLogLabelsFromRequest(r *http.Request) []string {
 	metadataHeader := r.Header.Get("X_WBCLIENT_REQ_META")
 	if metadataHeader == "" {
@@ -81,16 +71,13 @@ func fetchLogLabelsFromRequest(r *http.Request) []string {
 	return logLabels
 }
 
-// decodeReq is a helper function to decode JSON request body
 func decodeReq(body io.ReadCloser, v interface{}) error {
 	defer body.Close()
 	return json.NewDecoder(body).Decode(v)
 }
 
-// apiUserValidate handles user authentication with password
-// Uses either plain text auth or MSCHAPv2 based on IsPlainTextAuth flag
-func apiUserValidate(w http.ResponseWriter, r *http.Request) { //api rename
-	var req UserValidateReq
+func apiUserValidate(w http.ResponseWriter, r *http.Request) {
+	var req wbclientgo.UserValidateReq
 	ctx := r.Context()
 
 	if err := decodeReq(r.Body, &req); err != nil {
@@ -99,11 +86,10 @@ func apiUserValidate(w http.ResponseWriter, r *http.Request) { //api rename
 		return
 	}
 
-	// Validate required fields
 	if req.Username == "" || req.Password == "" || req.Domain == "" {
 		log.WithCtx(ctx).Errorf("wbclient(usertest) - missing required fields")
 		w.WriteHeader(http.StatusBadRequest)
-		resp := UserAuthResp{
+		resp := wbclientgo.UserAuthResp{
 			Success:      false,
 			ErrorCode:    -1,
 			ErrorMessage: "Username, password, and domain are required",
@@ -112,14 +98,11 @@ func apiUserValidate(w http.ResponseWriter, r *http.Request) { //api rename
 		return
 	}
 
-	var authResult UserAuthResp
+	var authResult wbclientgo.UserAuthResp
 
-	// Call appropriate authentication helper based on IsPlainTextAuth flag
 	if req.IsPlainTextAuth {
-		// Plain text authentication
 		authResult = AuthenticateWithPlainText(ctx, req)
 	} else {
-		// MSCHAPv2 authentication with password
 		authResult = AuthenticateWithChallenge(ctx, req)
 	}
 
@@ -131,9 +114,8 @@ func apiUserValidate(w http.ResponseWriter, r *http.Request) { //api rename
 	}
 }
 
-// apiUserAuth handles MSCHAPv2 authentication
 func apiUserAuth(w http.ResponseWriter, r *http.Request) {
-	var userAuthReq UserAuthReq
+	var userAuthReq wbclientgo.UserAuthReq
 	ctx := r.Context()
 
 	if err := decodeReq(r.Body, &userAuthReq); err != nil {
@@ -142,7 +124,6 @@ func apiUserAuth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Call AuthenticateMSCHAPv2 function
 	resp := AuthenticateMSCHAPv2(ctx, userAuthReq)
 
 	w.WriteHeader(http.StatusOK)
@@ -154,7 +135,7 @@ func apiUserAuth(w http.ResponseWriter, r *http.Request) {
 }
 
 func apiDomainJoin(w http.ResponseWriter, r *http.Request) {
-	var req DomainJoinReq
+	var req wbclientgo.DomainJoinReq
 	ctx := r.Context()
 
 	if err := decodeReq(r.Body, &req); err != nil {
@@ -166,7 +147,7 @@ func apiDomainJoin(w http.ResponseWriter, r *http.Request) {
 	if req.DCFQDN == "" || req.NetbiosName == "" || req.ADUsername == "" || req.ADPassword == "" {
 		log.WithCtx(ctx).Errorf("wbclient(domainjoin) - missing required fields")
 		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(DomainOpsResp{
+		json.NewEncoder(w).Encode(wbclientgo.DomainOpsResp{
 			ErrorMessage: "dcfqdn, netbiosName, adUsername and adPassword are all required",
 		})
 		return
@@ -178,7 +159,7 @@ func apiDomainJoin(w http.ResponseWriter, r *http.Request) {
 	if err := exec.CommandContext(ctx, "net", "ads", "testjoin").Run(); err == nil {
 		log.WithCtx(ctx).Printf("wbclient(domainjoin) - already joined; skipping script")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(DomainOpsResp{
+		json.NewEncoder(w).Encode(wbclientgo.DomainOpsResp{
 			Success:      true,
 			ErrorMessage: "already joined",
 		})
@@ -205,7 +186,7 @@ func apiDomainJoin(w http.ResponseWriter, r *http.Request) {
 		log.WithCtx(ctx).Errorf("wbclient(domainjoin) - script %s failed err=%v output=%s",
 			defaultDomainJoinScript, err, string(output))
 		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(DomainOpsResp{
+		json.NewEncoder(w).Encode(wbclientgo.DomainOpsResp{
 			ErrorMessage: fmt.Sprintf("domain-join script failed: %v", err),
 		})
 		return
@@ -213,11 +194,11 @@ func apiDomainJoin(w http.ResponseWriter, r *http.Request) {
 
 	log.WithCtx(ctx).Printf("wbclient(domainjoin) - script succeeded")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(DomainOpsResp{Success: true})
+	json.NewEncoder(w).Encode(wbclientgo.DomainOpsResp{Success: true})
 }
 
 func apiDomainLeave(w http.ResponseWriter, r *http.Request) {
-	var req DomainLeaveReq
+	var req wbclientgo.DomainLeaveReq
 	ctx := r.Context()
 	if err := decodeReq(r.Body, &req); err != nil {
 		log.WithCtx(ctx).Errorf("wbclient(domainleave) - decode request err=%v", err)
@@ -228,7 +209,7 @@ func apiDomainLeave(w http.ResponseWriter, r *http.Request) {
 	if req.ADUsername == "" || req.ADPassword == "" {
 		log.WithCtx(ctx).Errorf("wbclient(domainleave) - missing required fields")
 		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(DomainOpsResp{
+		json.NewEncoder(w).Encode(wbclientgo.DomainOpsResp{
 			ErrorMessage: "adUsername and adPassword are required",
 		})
 		return
@@ -240,7 +221,7 @@ func apiDomainLeave(w http.ResponseWriter, r *http.Request) {
 	if err := exec.CommandContext(ctx, "net", "ads", "testjoin").Run(); err != nil {
 		log.WithCtx(ctx).Printf("wbclient(domainleave) - not currently joined; nothing to do")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(DomainOpsResp{
+		json.NewEncoder(w).Encode(wbclientgo.DomainOpsResp{
 			Success:      true,
 			ErrorMessage: "not joined",
 		})
@@ -258,7 +239,7 @@ func apiDomainLeave(w http.ResponseWriter, r *http.Request) {
 		log.WithCtx(ctx).Errorf("wbclient(domainleave) - script %s failed err=%v output=%s",
 			defaultDomainLeaveScript, err, string(output))
 		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(DomainOpsResp{
+		json.NewEncoder(w).Encode(wbclientgo.DomainOpsResp{
 			ErrorMessage: fmt.Sprintf("domain-leave script failed: %v", err),
 		})
 		return
@@ -266,7 +247,7 @@ func apiDomainLeave(w http.ResponseWriter, r *http.Request) {
 
 	log.WithCtx(ctx).Printf("wbclient(domainleave) - script succeeded")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(DomainOpsResp{Success: true})
+	json.NewEncoder(w).Encode(wbclientgo.DomainOpsResp{Success: true})
 }
 
 func apiDomainJoinStatus(w http.ResponseWriter, r *http.Request) {
@@ -279,12 +260,12 @@ func apiDomainJoinStatus(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		log.WithCtx(ctx).Printf("wbclient(domainjoinstatus) - wbinfo -t failed err=%v output=%s",
 			err, string(output))
-		json.NewEncoder(w).Encode(DomainOpsResp{
+		json.NewEncoder(w).Encode(wbclientgo.DomainOpsResp{
 			ErrorMessage: fmt.Sprintf("wbinfo -t failed: %v: %s", err, string(output)),
 		})
 		return
 	}
 
 	log.WithCtx(ctx).Printf("wbclient(domainjoinstatus) - wbinfo -t ok")
-	json.NewEncoder(w).Encode(DomainOpsResp{Success: true})
+	json.NewEncoder(w).Encode(wbclientgo.DomainOpsResp{Success: true})
 }

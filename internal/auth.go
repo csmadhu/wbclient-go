@@ -1,4 +1,4 @@
-package wbclientgo
+package internal
 
 /*
 #cgo darwin CFLAGS: -I/opt/homebrew/opt/samba/include
@@ -165,21 +165,17 @@ import (
 	"time"
 	"unsafe"
 
+	wbclientgo "github.com/csmadhu/wbclient-go"
 	"github.com/csmadhu/wbclient-go/log"
 )
 
 const (
-	// NT Status codes
-	NT_STATUS_PASSWORD_EXPIRED     = 0xC0000071
-	NT_STATUS_PASSWORD_MUST_CHANGE = 0xC0000224
-
-	// NT hash length
-	NT_DIGEST_LENGTH = 16
+	ntStatusPasswordExpired    = 0xC0000071
+	ntStatusPasswordMustChange = 0xC0000224
+	ntDigestLength             = 16
 )
 
-// processWbcAuthError is a reusable function to process wbcErr with detailed error info
-// This function handles error processing for both MSCHAPv2 and plain text authentication
-func processWbcAuthError(err C.wbcErr, detailedErr *C.struct_wbcAuthErrorInfo) (result UserAuthResp) {
+func processWbcAuthError(err C.wbcErr, detailedErr *C.struct_wbcAuthErrorInfo) (result wbclientgo.UserAuthResp) {
 	switch err {
 	case C.WBC_ERR_SUCCESS:
 		result.Success = true
@@ -202,8 +198,7 @@ func processWbcAuthError(err C.wbcErr, detailedErr *C.struct_wbcAuthErrorInfo) (
 		if detailedErr != nil {
 			ntStatus := uint32(C.get_nt_status(detailedErr))
 
-			// Check for password expiry conditions
-			if ntStatus == NT_STATUS_PASSWORD_EXPIRED || ntStatus == NT_STATUS_PASSWORD_MUST_CHANGE {
+			if ntStatus == ntStatusPasswordExpired || ntStatus == ntStatusPasswordMustChange {
 				result.ErrorCode = -648
 			}
 
@@ -235,8 +230,7 @@ func processWbcAuthError(err C.wbcErr, detailedErr *C.struct_wbcAuthErrorInfo) (
 	return result
 }
 
-// AuthenticateMSCHAPv2 performs MSCHAPv2 authentication
-func AuthenticateMSCHAPv2(ctx context.Context, req UserAuthReq) (result UserAuthResp) {
+func AuthenticateMSCHAPv2(ctx context.Context, req wbclientgo.UserAuthReq) (result wbclientgo.UserAuthResp) {
 	t := time.Now()
 	log.WithCtx(ctx).Printf("wbclient - authenticate mschapv2: username:%s domain:%s challenge:%x response:%x", req.Username, req.Domain, req.Challenge, req.Response)
 
@@ -275,24 +269,9 @@ func AuthenticateMSCHAPv2(ctx context.Context, req UserAuthReq) (result UserAuth
 	return result
 }
 
-// AuthenticateWithChallenge performs MSCHAPv2 authentication using username, domain, and password.
-// This function replicates the flow from cmd/authtest/main.go:
-// 1. Generate a random 8-byte challenge
-// 2. Generate the NT-Response from the password
-// 3. Call AuthenticateMSCHAPv2 to verify credentials
-//
-// Parameters:
-//   - ctx: context for logging with metadata
-//   - username: username to authenticate
-//   - domain: domain name (NetBIOS name, not DNS name)
-//   - password: plaintext password
-//
-// Returns:
-//   - AuthResult: authentication result with success status and error details
-func AuthenticateWithChallenge(ctx context.Context, req UserValidateReq) UserAuthResp {
-	// Validate input
+func AuthenticateWithChallenge(ctx context.Context, req wbclientgo.UserValidateReq) wbclientgo.UserAuthResp {
 	if req.Username == "" || req.Password == "" {
-		result := UserAuthResp{
+		result := wbclientgo.UserAuthResp{
 			ErrorMessage: "Username and password required",
 			ErrorCode:    -1,
 			Success:      false,
@@ -303,24 +282,18 @@ func AuthenticateWithChallenge(ctx context.Context, req UserValidateReq) UserAut
 
 	log.WithCtx(ctx).Printf("wbclient - authenticate with challenge: username[%s] domain[%s]", req.Username, req.Domain)
 
-	// Step 1: Generate a random 8-byte challenge
 	challenge, err := GenerateRandomChallenge()
 	if err != nil {
-		return UserAuthResp{
+		return wbclientgo.UserAuthResp{
 			Success:      false,
 			ErrorCode:    -1,
 			ErrorMessage: fmt.Sprintf("Failed to generate challenge: %v", err),
 		}
 	}
 
-	// Step 2: Generate the NT-Response using the password
-	// This computes: ChallengeResponse(Challenge, MD4(UTF-16LE(Password)))
 	ntResponse := GenerateNTResponseSimple(challenge, req.Password)
 
-	// Step 3: Authenticate using Winbind
-	// This calls the Winbind library (libwbclient) to verify the credentials
-	// against Active Directory via the domain controller
-	result := AuthenticateMSCHAPv2(ctx, UserAuthReq{
+	result := AuthenticateMSCHAPv2(ctx, wbclientgo.UserAuthReq{
 		Username:  req.Username,
 		Domain:    req.Domain,
 		Challenge: challenge,
@@ -330,20 +303,9 @@ func AuthenticateWithChallenge(ctx context.Context, req UserValidateReq) UserAut
 	return result
 }
 
-// AuthenticateWithPlainText performs plain text password authentication using wbclient library.
-//
-// Parameters:
-//   - ctx: context for logging with metadata
-//   - username: username to authenticate
-//   - domain: domain name (kept for API consistency, not used in wbcAuthenticateUser)
-//   - password: plaintext password
-//
-// Returns:
-//   - AuthResp: authentication result
-func AuthenticateWithPlainText(ctx context.Context, req UserValidateReq) UserAuthResp {
-	// Validate input
+func AuthenticateWithPlainText(ctx context.Context, req wbclientgo.UserValidateReq) wbclientgo.UserAuthResp {
 	if req.Username == "" || req.Password == "" {
-		result := UserAuthResp{
+		result := wbclientgo.UserAuthResp{
 			ErrorMessage: "Username and password required",
 			ErrorCode:    -1,
 			Success:      false,
@@ -354,20 +316,15 @@ func AuthenticateWithPlainText(ctx context.Context, req UserValidateReq) UserAut
 
 	log.WithCtx(ctx).Printf("wbclient - plaintext auth: username[%s] domain[%s]", req.Username, req.Domain)
 
-	// Convert Go strings to C strings
 	cUsername := C.CString(req.Username)
 	cPassword := C.CString(req.Password)
 	defer C.free(unsafe.Pointer(cUsername))
 	defer C.free(unsafe.Pointer(cPassword))
 
-	// Call wbcAuthenticateUser directly
 	err := C.wbcAuthenticateUser(cUsername, cPassword)
 
-	// Process the authentication result using the reusable function
-	// No error struct available for plain text auth
 	result := processWbcAuthError(err, nil)
 
-	// Log the result
 	if result.Success {
 		log.WithCtx(ctx).Printf("wbclient - plaintext auth succeeded for username[%s]", req.Username)
 	} else {

@@ -1,7 +1,7 @@
 package main
 
-import wbclientgo "github.com/csmadhu/wbclient-go"
+import "github.com/csmadhu/wbclient-go/internal"
 
 func main() {
-	wbclientgo.Start()
+	internal.Start()
 }

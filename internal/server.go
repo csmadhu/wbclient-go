@@ -1,4 +1,4 @@
-package wbclientgo
+package internal
 
 import (
 	"context"
@@ -8,8 +8,8 @@ import (
 	"os"
 	"os/exec"
 
-	"github.com/gorilla/mux"
 	"github.com/csmadhu/wbclient-go/log"
+	"github.com/gorilla/mux"
 )
 
 func Start() {
@@ -46,7 +46,6 @@ func validateConfig() {
 
 func startServer(router *mux.Router) {
 	ctx := context.Background()
-	// start http server
 	httpServer := &http.Server{
 		Handler: router,
 	}

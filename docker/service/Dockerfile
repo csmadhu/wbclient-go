@@ -5,34 +5,20 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 # Install Samba, libwbclient, Go, and AD tools
 RUN apt-get update && apt-get install -y \
-    samba \
-    smbclient \
+    samba-common-bin \
     winbind \
     libwbclient-dev \
-    samba-dsdb-modules \
+    libwbclient0 \
+    libtalloc2 \
+    libtalloc-dev \
     krb5-user \
+    crudini \
     golang-go \
     build-essential \
     pkg-config \
     git \
-    libtalloc2 \
-    libwbclient0 \
-    libtalloc-dev \
-    systemd \
     dnsutils \
     iputils-ping \
-    libpam-winbind \
-    libnss-winbind \
-    vim \
-    realmd \
-    samba-common-bin \
-    dbus \
-    sssd \
-    sssd-tools \
-    libnss-sss \
-    libpam-sss \
-    crudini \
-    adcli \
     && apt-get clean
 
 RUN mkdir -p /var/lib/samba/private && chmod 700 /var/lib/samba/private
@@ -40,7 +26,7 @@ RUN mkdir -p /var/lib/samba/private && chmod 700 /var/lib/samba/private
 ENV PATH="/usr/local/go/bin:$PATH"
 ENV CGO_ENABLED=1
 
-RUN samba -V && go version
+RUN net --version && go version
 
 WORKDIR /usr/src/wbclient
 
@@ -48,6 +34,9 @@ COPY . .
 
 RUN go mod download \
  && chmod +x scripts/*.sh docker/service/entrypoint.sh \
- && go build -buildvcs=false -o /usr/local/bin/wbclient ./cmd/wbclient
+ && go build -buildvcs=false -o /usr/local/bin/wbclient ./cmd/wbclient \
+ && find . -mindepth 1 -not -path './scripts/*' -not -path './scripts' \
+      -not -path './docker/service/entrypoint.sh' -not -path './docker/service' -not -path './docker' \
+      -delete
 
 CMD ["/usr/src/wbclient/docker/service/entrypoint.sh"]

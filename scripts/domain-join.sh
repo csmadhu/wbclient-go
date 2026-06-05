@@ -71,6 +71,7 @@ crudini --set ${SAMBA_CONF} global "client ntlmv2 auth" "yes"
 crudini --set ${SAMBA_CONF} global "ntlm auth" "yes"
 crudini --set ${SAMBA_CONF} global "winbind use default domain" "yes"
 crudini --set ${SAMBA_CONF} global "machine password timeout" "${MACHINE_PASSWORD_TIMEOUT:-2592000}"
+crudini --set ${SAMBA_CONF} global "log level" "1"
 
 echo ""
 echo "Generated smb.conf:"
