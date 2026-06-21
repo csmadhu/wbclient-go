@@ -40,8 +40,12 @@ mkdir -p /var/log/samba
 
 [[ -f /etc/samba/smb.conf && ! -f /etc/samba/smb.conf.original ]] && \
     mv /etc/samba/smb.conf /etc/samba/smb.conf.original
+# cp (not mv) — when the caller bind-mounts /etc/krb5.conf as a single file
+# (e.g. Kubernetes subPath), the kernel returns EBUSY on rename/unlink of the
+# mount point. The `cat > /etc/krb5.conf` below truncates in place, which is
+# safe against the bind mount.
 [[ -f /etc/krb5.conf && ! -f /etc/krb5.conf.original ]] && \
-    mv /etc/krb5.conf /etc/krb5.conf.original
+    cp /etc/krb5.conf /etc/krb5.conf.original
 
 cat > /etc/krb5.conf << EOF
 [libdefaults]
