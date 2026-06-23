@@ -14,6 +14,7 @@ services:
         - go-cache-svc:/root/.cache
         - samba-config:/etc/samba
         - samba-private:/var/lib/samba/private
+        - samba-logs:/var/log/samba
         - /sys/fs/cgroup:/sys/fs/cgroup:rw
         - /etc/localtime:/etc/localtime:ro
       privileged: true
@@ -31,3 +32,4 @@ volumes:
     go-cache-svc: {}
     samba-config: {}
     samba-private: {}
+    samba-logs: {}

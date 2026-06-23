@@ -12,6 +12,7 @@ IMAGE_NAME="wbclient-service-image"
 DOCKERFILE="docker/service/Dockerfile"
 API_TOKEN=""
 SERVICE_PORT="8080"
+SAMBA_LOG_LEVEL="10"
 DC_IP=""
 DOMAIN_NAME=""
 
@@ -37,6 +38,7 @@ Required options:
 Service options:
     --api-token         API token for WBCLIENT_API_TOKEN (default: secret)
     --port              Service port for WBCLIENT_PORT (default: 8080)
+    --samba-log-level   Samba log verbosity 0-10 (default: 10)
 
 Other options:
     -h, --help          Show this help message
@@ -58,6 +60,7 @@ while [[ $# -gt 0 ]]; do
         --domain-name) DOMAIN_NAME="$2"; shift 2 ;;
         --api-token)  API_TOKEN="$2"; shift 2 ;;
         --port)       SERVICE_PORT="$2"; shift 2 ;;
+        --samba-log-level) SAMBA_LOG_LEVEL="$2"; shift 2 ;;
         -h|--help)    usage ;;
         *)            print_error "Unknown option: $1"; usage ;;
     esac
@@ -100,9 +103,13 @@ docker run -d \
     -v "go-cache-svc:/root/.cache" \
     -v "/sys/fs/cgroup:/sys/fs/cgroup:rw" \
     -v "/etc/localtime:/etc/localtime:ro" \
+    -v "samba-config:/etc/samba" \
+    -v "samba-private:/var/lib/samba/private" \
+    -v "samba-logs:/var/log/samba" \
     --privileged \
     -e "WBCLIENT_API_TOKEN=$API_TOKEN" \
     -e "WBCLIENT_PORT=$SERVICE_PORT" \
+    -e "SAMBA_LOG_LEVEL=$SAMBA_LOG_LEVEL" \
     -t \
     --stop-signal SIGRTMIN+3 \
     --tmpfs /run \
