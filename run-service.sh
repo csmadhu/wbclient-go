@@ -12,7 +12,7 @@ IMAGE_NAME="wbclient-service-image"
 DOCKERFILE="docker/service/Dockerfile"
 API_TOKEN=""
 SERVICE_PORT="8080"
-SAMBA_LOG_LEVEL="10"
+SAMBA_LOG_LEVEL="3"
 DC_IP=""
 DOMAIN_NAME=""
 

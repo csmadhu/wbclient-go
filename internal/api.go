@@ -218,15 +218,6 @@ func apiDomainLeave(w http.ResponseWriter, r *http.Request) {
 	log.WithCtx(ctx).Printf("wbclient(domainleave) - request: domain[%s] user[%s]",
 		req.Domain, req.ADUsername)
 
-	// Always invoke the leave script. We deliberately do NOT gate on
-	// `net ads testjoin` here: testjoin requires live DC reachability and
-	// returns failure on transient DNS/network blips even when local trust
-	// state (secrets.tdb, smb.conf, krb5.conf) is fully intact. Treating
-	// that as "not joined" and short-circuiting would leave the machine's
-	// credentials on disk, so winbind would continue to authenticate users
-	// after a "successful" leave — a security bug. The script itself is
-	// idempotent and tears down local state even if the AD-side `net ads
-	// leave` cannot reach the DC.
 	cmd := exec.CommandContext(ctx, "bash", defaultDomainLeaveScript)
 	cmd.Env = append(os.Environ(),
 		"AD_USERNAME="+req.ADUsername,
@@ -239,7 +230,7 @@ func apiDomainLeave(w http.ResponseWriter, r *http.Request) {
 			defaultDomainLeaveScript, err, string(output))
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(wbclientgo.DomainOpsResp{
-			ErrorMessage: fmt.Sprintf("domain-leave script failed: %v", err),
+			ErrorMessage: fmt.Sprintf("domain-leave script failed: %v: %s", err, string(output)),
 		})
 		return
 	}
