@@ -6,10 +6,33 @@ import (
 	"io"
 	"os"
 	"strings"
+	"sync/atomic"
 )
 
 var (
 	enableDebugLog = (os.Getenv("ENABLE_DEBUG_LOG") == "true")
+)
+
+type Level int
+
+const (
+	_ Level = iota
+	LevelDebug
+	LevelInfo
+	LevelWarning
+	LevelError
+
+	LevelDefault = LevelInfo
+)
+
+const (
+	LevelStrDebug   = "DEBUG"
+	LevelStrInfo    = "INFO"
+	LevelStrWarning = "WARNING"
+	LevelStrError   = "ERROR"
+
+	LevelStrWarn    = "WARN"
+	LevelStrDefault = LevelStrInfo
 )
 
 type Set[T comparable] map[T]struct{}
@@ -62,6 +85,8 @@ func newLogger() Logger {
 	switch strings.ToLower(encoding) {
 	case "json":
 		return NewJSONLogger(nil)
+	case "journald":
+		return NewJournaldLogger(nil)
 	default:
 		return NewTextLogger()
 	}
@@ -168,4 +193,45 @@ func UpdateDebugLogSetting(enable bool) {
 // mainly used for testing purpose.
 func IsDebugLogEnabled() bool {
 	return enableDebugLog
+}
+
+func LevelFromString(s string) Level {
+	switch strings.ToUpper(s) {
+	case LevelStrDebug:
+		return LevelDebug
+	case LevelStrInfo:
+		return LevelInfo
+	case LevelStrWarn, LevelStrWarning:
+		return LevelWarning
+	case LevelStrError:
+		return LevelError
+	default:
+		return LevelDefault
+	}
+}
+
+var level atomic.Int32
+
+func SetLevel(s string) {
+	level.Store(int32(LevelFromString(s)))
+}
+
+func GetLevel() Level {
+	l := Level(level.Load())
+	if l == 0 {
+		return LevelDefault
+	}
+	return l
+}
+
+func IsInfoLogEnabled() bool {
+	return GetLevel() <= LevelInfo
+}
+
+func IsWarnLogEnabled() bool {
+	return GetLevel() <= LevelWarning
+}
+
+func IsErrorLogEnabled() bool {
+	return GetLevel() <= LevelError
 }

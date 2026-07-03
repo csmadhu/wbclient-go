@@ -1,12 +1,16 @@
 package internal
 
 import (
+	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"os/exec"
+	"strings"
+	"sync"
 
 	wbclientgo "github.com/csmadhu/wbclient-go"
 	"github.com/csmadhu/wbclient-go/log"
@@ -69,6 +73,13 @@ func fetchLogLabelsFromRequest(r *http.Request) []string {
 	}
 
 	return logLabels
+}
+
+func scriptError(stderr string, err error) string {
+	if msg := strings.TrimSpace(stderr); msg != "" {
+		return msg
+	}
+	return fmt.Sprintf("UNKNOWN_ERROR: %v", err)
 }
 
 func decodeReq(body io.ReadCloser, v interface{}) error {
@@ -156,7 +167,7 @@ func apiDomainJoin(w http.ResponseWriter, r *http.Request) {
 	log.WithCtx(ctx).Printf("wbclient(domainjoin) - request: dcfqdn[%s] netbios[%s] user[%s]",
 		req.DCFQDN, req.NetbiosName, req.ADUsername)
 
-	if err := exec.CommandContext(ctx, "net", "ads", "testjoin").Run(); err == nil {
+	if err := exec.CommandContext(ctx, "wbinfo", "-t").Run(); err == nil {
 		log.WithCtx(ctx).Printf("wbclient(domainjoin) - already joined; skipping script")
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(wbclientgo.DomainOpsResp{
@@ -181,18 +192,41 @@ func apiDomainJoin(w http.ResponseWriter, r *http.Request) {
 		fmt.Sprintf("MACHINE_PASSWORD_TIMEOUT=%d", timeoutSeconds),
 	)
 
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		log.WithCtx(ctx).Errorf("wbclient(domainjoin) - script %s failed err=%v output=%s",
-			defaultDomainJoinScript, err, string(output))
+	stdoutPipe, _ := cmd.StdoutPipe()
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Start(); err != nil {
+		log.WithCtx(ctx).Errorf("wbclient(domainjoin) - script start failed err=%v", err)
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(wbclientgo.DomainOpsResp{
-			ErrorMessage: fmt.Sprintf("domain-join script failed: %v", err),
+			ErrorMessage: fmt.Sprintf("UNKNOWN_ERROR: %v", err),
 		})
 		return
 	}
 
-	log.WithCtx(ctx).Printf("wbclient(domainjoin) - script succeeded")
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		scanner := bufio.NewScanner(stdoutPipe)
+		for scanner.Scan() {
+			log.WithCtx(ctx).Printf("wbclient(domainjoin) - %s", scanner.Text())
+		}
+	}()
+
+	wg.Wait()
+	err := cmd.Wait()
+
+	if err != nil {
+		log.WithCtx(ctx).Errorf("wbclient(domainjoin) - script failed err=%v stderr=%s", err, stderr.String())
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(wbclientgo.DomainOpsResp{
+			ErrorMessage: scriptError(stderr.String(), err),
+		})
+		return
+	}
+
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(wbclientgo.DomainOpsResp{Success: true})
 }
@@ -224,18 +258,41 @@ func apiDomainLeave(w http.ResponseWriter, r *http.Request) {
 		"AD_PASSWORD="+req.ADPassword,
 	)
 
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		log.WithCtx(ctx).Errorf("wbclient(domainleave) - script %s failed err=%v output=%s",
-			defaultDomainLeaveScript, err, string(output))
+	stdoutPipe, _ := cmd.StdoutPipe()
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Start(); err != nil {
+		log.WithCtx(ctx).Errorf("wbclient(domainleave) - script start failed err=%v", err)
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(wbclientgo.DomainOpsResp{
-			ErrorMessage: fmt.Sprintf("domain-leave script failed: %v: %s", err, string(output)),
+			ErrorMessage: fmt.Sprintf("UNKNOWN_ERROR: %v", err),
 		})
 		return
 	}
 
-	log.WithCtx(ctx).Printf("wbclient(domainleave) - script succeeded")
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		scanner := bufio.NewScanner(stdoutPipe)
+		for scanner.Scan() {
+			log.WithCtx(ctx).Printf("wbclient(domainleave) - %s", scanner.Text())
+		}
+	}()
+
+	wg.Wait()
+	err := cmd.Wait()
+
+	if err != nil {
+		log.WithCtx(ctx).Errorf("wbclient(domainleave) - script failed err=%v stderr=%s", err, stderr.String())
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(wbclientgo.DomainOpsResp{
+			ErrorMessage: scriptError(stderr.String(), err),
+		})
+		return
+	}
+
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(wbclientgo.DomainOpsResp{Success: true})
 }
@@ -244,18 +301,41 @@ func apiDomainJoinStatus(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
 	cmd := exec.CommandContext(ctx, "bash", defaultDomainJoinStatusScript)
-	output, err := cmd.CombinedOutput()
 
-	w.WriteHeader(http.StatusOK)
-	if err != nil {
-		log.WithCtx(ctx).Printf("wbclient(domainjoinstatus) - wbinfo -t failed err=%v output=%s",
-			err, string(output))
+	stdoutPipe, _ := cmd.StdoutPipe()
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Start(); err != nil {
+		log.WithCtx(ctx).Errorf("wbclient(domainjoinstatus) - script start failed err=%v", err)
+		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(wbclientgo.DomainOpsResp{
-			ErrorMessage: fmt.Sprintf("wbinfo -t failed: %v: %s", err, string(output)),
+			ErrorMessage: fmt.Sprintf("UNKNOWN_ERROR: %v", err),
 		})
 		return
 	}
 
-	log.WithCtx(ctx).Printf("wbclient(domainjoinstatus) - wbinfo -t ok")
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		scanner := bufio.NewScanner(stdoutPipe)
+		for scanner.Scan() {
+			log.WithCtx(ctx).Printf("wbclient(domainjoinstatus) - %s", scanner.Text())
+		}
+	}()
+
+	wg.Wait()
+	err := cmd.Wait()
+
+	w.WriteHeader(http.StatusOK)
+	if err != nil {
+		log.WithCtx(ctx).Errorf("wbclient(domainjoinstatus) - trust check failed err=%v stderr=%s", err, stderr.String())
+		json.NewEncoder(w).Encode(wbclientgo.DomainOpsResp{
+			ErrorMessage: scriptError(stderr.String(), err),
+		})
+		return
+	}
+
 	json.NewEncoder(w).Encode(wbclientgo.DomainOpsResp{Success: true})
 }
