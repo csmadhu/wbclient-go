@@ -21,6 +21,7 @@ const (
 	defaultDomainJoinScript       = "/usr/src/wbclient/scripts/domain-join.sh"
 	defaultDomainLeaveScript      = "/usr/src/wbclient/scripts/domain-leave.sh"
 	defaultDomainJoinStatusScript = "/usr/src/wbclient/scripts/domain-join-status.sh"
+	defaultSetLogLevelScript      = "/usr/src/wbclient/scripts/set-log-level.sh"
 
 	defaultMachinePasswordTimeoutDays = 30
 	secondsPerDay                     = 86400
@@ -32,6 +33,7 @@ func initRoutes(router *mux.Router) {
 	router.HandleFunc(fmt.Sprintf("/%s", wbclientgo.DomainJoin), createApiHandler(apiDomainJoin)).Methods("POST")
 	router.HandleFunc(fmt.Sprintf("/%s", wbclientgo.DomainLeave), createApiHandler(apiDomainLeave)).Methods("POST")
 	router.HandleFunc(fmt.Sprintf("/%s", wbclientgo.DomainJoinStatus), createApiHandler(apiDomainJoinStatus)).Methods("POST")
+	router.HandleFunc(fmt.Sprintf("/%s", wbclientgo.LogLevel), createApiHandler(apiSetLogLevel)).Methods("POST")
 }
 
 func createApiHandler(fn http.HandlerFunc) http.HandlerFunc {
@@ -286,6 +288,71 @@ func apiDomainLeave(w http.ResponseWriter, r *http.Request) {
 
 	if err != nil {
 		log.WithCtx(ctx).Errorf("wbclient(domainleave) - script failed err=%v stderr=%s", err, stderr.String())
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(wbclientgo.DomainOpsResp{
+			ErrorMessage: scriptError(stderr.String(), err),
+		})
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(wbclientgo.DomainOpsResp{Success: true})
+}
+
+func apiSetLogLevel(w http.ResponseWriter, r *http.Request) {
+	var req wbclientgo.SetLogLevelReq
+	ctx := r.Context()
+
+	if err := decodeReq(r.Body, &req); err != nil {
+		log.WithCtx(ctx).Errorf("wbclient(setloglevel) - decode request err=%v", err)
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	if req.LogLevel < 0 || req.LogLevel > 10 {
+		log.WithCtx(ctx).Errorf("wbclient(setloglevel) - invalid log level: %d", req.LogLevel)
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(wbclientgo.DomainOpsResp{
+			ErrorMessage: "logLevel must be between 0 and 10",
+		})
+		return
+	}
+
+	log.WithCtx(ctx).Printf("wbclient(setloglevel) - request: logLevel[%d]", req.LogLevel)
+
+	cmd := exec.CommandContext(ctx, "bash", defaultSetLogLevelScript)
+	cmd.Env = append(os.Environ(),
+		fmt.Sprintf("SAMBA_LOG_LEVEL=%d", req.LogLevel),
+	)
+
+	stdoutPipe, _ := cmd.StdoutPipe()
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Start(); err != nil {
+		log.WithCtx(ctx).Errorf("wbclient(setloglevel) - script start failed err=%v", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(wbclientgo.DomainOpsResp{
+			ErrorMessage: fmt.Sprintf("UNKNOWN_ERROR: %v", err),
+		})
+		return
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		scanner := bufio.NewScanner(stdoutPipe)
+		for scanner.Scan() {
+			log.WithCtx(ctx).Printf("wbclient(setloglevel) - %s", scanner.Text())
+		}
+	}()
+
+	wg.Wait()
+	err := cmd.Wait()
+
+	if err != nil {
+		log.WithCtx(ctx).Errorf("wbclient(setloglevel) - script failed err=%v stderr=%s", err, stderr.String())
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(wbclientgo.DomainOpsResp{
 			ErrorMessage: scriptError(stderr.String(), err),

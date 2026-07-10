@@ -6,6 +6,7 @@ const (
 	DomainJoin       = "samba.domain.join"
 	DomainLeave      = "samba.domain.leave"
 	DomainJoinStatus = "samba.domain.join.status"
+	LogLevel         = "samba.log.level"
 )
 
 // UserValidateReq represents the request for test authentication
@@ -44,6 +45,10 @@ type DomainLeaveReq struct {
 	Domain     string `json:"domain"`
 	ADUsername string `json:"adUsername"`
 	ADPassword string `json:"adPassword"`
+}
+
+type SetLogLevelReq struct {
+	LogLevel int `json:"logLevel"`
 }
 
 type DomainOpsResp struct {
