@@ -220,16 +220,15 @@ func apiDomainJoin(w http.ResponseWriter, r *http.Request) {
 	wg.Wait()
 	err := cmd.Wait()
 
+	w.WriteHeader(http.StatusOK)
 	if err != nil {
 		log.WithCtx(ctx).Errorf("wbclient(domainjoin) - script failed err=%v stderr=%s", err, stderr.String())
-		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(wbclientgo.DomainOpsResp{
 			ErrorMessage: scriptError(stderr.String(), err),
 		})
 		return
 	}
 
-	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(wbclientgo.DomainOpsResp{Success: true})
 }
 
@@ -286,16 +285,15 @@ func apiDomainLeave(w http.ResponseWriter, r *http.Request) {
 	wg.Wait()
 	err := cmd.Wait()
 
+	w.WriteHeader(http.StatusOK)
 	if err != nil {
 		log.WithCtx(ctx).Errorf("wbclient(domainleave) - script failed err=%v stderr=%s", err, stderr.String())
-		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(wbclientgo.DomainOpsResp{
 			ErrorMessage: scriptError(stderr.String(), err),
 		})
 		return
 	}
 
-	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(wbclientgo.DomainOpsResp{Success: true})
 }
 
