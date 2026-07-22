@@ -177,7 +177,7 @@ const (
 	ntDigestLength             = 16
 )
 
-var wbThrottler = NewWinbindThrottler(envInt("WBCLIENT_MAX_CONCURRENT_AUTH", 100))
+var wbThrottler = NewWinbindThrottler(envInt("WBCLIENT_MAX_CONCURRENT_AUTH", 400))
 
 func envInt(key string, fallback int) int {
 	v := os.Getenv(key)

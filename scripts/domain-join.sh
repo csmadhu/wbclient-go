@@ -99,9 +99,9 @@ configure_samba() {
         crudini --set ${SAMBA_CONF} global "winbind use default domain" "yes" &&
         crudini --set ${SAMBA_CONF} global "machine password timeout" "${MACHINE_PASSWORD_TIMEOUT:-2592000}" &&
         crudini --set ${SAMBA_CONF} global "log level" "${SAMBA_LOG_LEVEL:-3}" &&
-        crudini --set ${SAMBA_CONF} global "winbind max domain connections" "4" &&
+        crudini --set ${SAMBA_CONF} global "winbind max domain connections" "8" &&
         crudini --set ${SAMBA_CONF} global "winbind request timeout" "10" &&
-        crudini --set ${SAMBA_CONF} global "winbind max clients" "200"
+        crudini --set ${SAMBA_CONF} global "winbind max clients" "500"
     2>&1); then
         die "CONFIG_FAILED" "${output}"
     fi
