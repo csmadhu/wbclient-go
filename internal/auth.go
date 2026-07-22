@@ -162,6 +162,8 @@ import "C"
 import (
 	"context"
 	"fmt"
+	"os"
+	"strconv"
 	"time"
 	"unsafe"
 
@@ -174,6 +176,20 @@ const (
 	ntStatusPasswordMustChange = 0xC0000224
 	ntDigestLength             = 16
 )
+
+var wbThrottler = NewWinbindThrottler(envInt("WBCLIENT_MAX_CONCURRENT_AUTH", 100))
+
+func envInt(key string, fallback int) int {
+	v := os.Getenv(key)
+	if v == "" {
+		return fallback
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n <= 0 {
+		return fallback
+	}
+	return n
+}
 
 func processWbcAuthError(err C.wbcErr, detailedErr *C.struct_wbcAuthErrorInfo) (result wbclientgo.UserAuthResp) {
 	switch err {
@@ -232,13 +248,21 @@ func processWbcAuthError(err C.wbcErr, detailedErr *C.struct_wbcAuthErrorInfo) (
 
 func AuthenticateMSCHAPv2(ctx context.Context, req wbclientgo.UserAuthReq) (result wbclientgo.UserAuthResp) {
 	t := time.Now()
-	log.WithCtx(ctx).Printf("wbclient - authenticate mschapv2: username:%s domain:%s challenge:%x response:%x", req.Username, req.Domain, req.Challenge, req.Response)
+	log.WithCtx(ctx).Printf("wbclient - authenticate mschapv2: username:%s domain:%s challenge:%x response:%x", req.Username, req.Domain,
+		req.Challenge, req.Response)
 
 	if req.Username == "" || req.Domain == "" {
 		result.ErrorMessage = "Username and domain required"
 		result.ErrorCode = -1
 		return result
 	}
+
+	if err := wbThrottler.Acquire(ctx); err != nil {
+		result.ErrorCode = -2
+		result.ErrorMessage = fmt.Sprintf("Request cancelled while waiting for winbind: %v", err)
+		return result
+	}
+	defer wbThrottler.Release()
 
 	cUsername := C.CString(req.Username)
 	cDomain := C.CString(req.Domain)
@@ -315,6 +339,15 @@ func AuthenticateWithPlainText(ctx context.Context, req wbclientgo.UserValidateR
 	}
 
 	log.WithCtx(ctx).Printf("wbclient - plaintext auth: username[%s] domain[%s]", req.Username, req.Domain)
+
+	if err := wbThrottler.Acquire(ctx); err != nil {
+		return wbclientgo.UserAuthResp{
+			Success:      false,
+			ErrorCode:    -2,
+			ErrorMessage: fmt.Sprintf("Request cancelled while waiting for winbind: %v", err),
+		}
+	}
+	defer wbThrottler.Release()
 
 	cUsername := C.CString(req.Username)
 	cPassword := C.CString(req.Password)
