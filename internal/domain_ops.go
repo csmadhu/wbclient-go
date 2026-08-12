@@ -19,6 +19,7 @@ const (
 	defaultDomainLeaveScript      = "/usr/src/wbclient/scripts/domain-leave.sh"
 	defaultDomainJoinStatusScript = "/usr/src/wbclient/scripts/domain-join-status.sh"
 	defaultSetLogLevelScript      = "/usr/src/wbclient/scripts/set-log-level.sh"
+	defaultMigrateConfigScript   = "/usr/src/wbclient/scripts/migrate-config.sh"
 
 	defaultMachinePasswordTimeoutDays = 30
 	secondsPerDay                     = 86400
@@ -124,4 +125,8 @@ func SetLogLevel(ctx context.Context, req wbclientgo.SetLogLevelReq) wbclientgo.
 	}
 
 	return runScript(ctx, defaultSetLogLevelScript, env, "setloglevel")
+}
+
+func runMigrateConfigScript(ctx context.Context) wbclientgo.DomainOpsResp {
+	return runScript(ctx, defaultMigrateConfigScript, nil, "migrateconfig")
 }

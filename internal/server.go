@@ -13,11 +13,21 @@ import (
 )
 
 func Start() {
-	validateConfig()
+	validateEnv()
+	migrateConfig()
 	restoreWinbindd()
 	router := mux.NewRouter()
 	initRoutes(router)
 	startServer(router)
+}
+
+func migrateConfig() {
+	ctx := context.Background()
+	resp := runMigrateConfigScript(ctx)
+	if !resp.Success {
+		log.WithCtx(ctx).Fatalf("wbclient - config migration failed: %s", resp.ErrorMessage)
+	}
+	log.WithCtx(ctx).Printf("wbclient - config migration completed")
 }
 
 func restoreWinbindd() {
@@ -30,7 +40,7 @@ func restoreWinbindd() {
 	log.WithCtx(ctx).Printf("wbclient - winbindd restored from persisted join state")
 }
 
-func validateConfig() {
+func validateEnv() {
 	ctx := context.Background()
 	requiredEnvList := []string{
 		"WBCLIENT_API_TOKEN",
