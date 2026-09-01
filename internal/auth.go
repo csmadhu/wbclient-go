@@ -299,12 +299,12 @@ func AuthenticateMSCHAPv2(ctx context.Context, req wbclientgo.UserAuthReq) (resu
 
 	result.ErrorCode = rcode
 	result.NTHashHash = ntHashHash
-	result.Success = (rcode == 0)
+	result.Success = rcode == 0
 
 	errMsg := C.GoString(cErrorMsg)
 	ntStatus := uint32(outNTStatus)
 	if ntStatus != 0 {
-		result.ErrorMessage = fmt.Sprintf("%s: %s", ntStatusBaseError(ntStatus), errMsg)
+		result.ErrorMessage = fmt.Sprintf("%s: %v", ntStatusBaseError(ntStatus), errMsg)
 	} else {
 		result.ErrorMessage = errMsg
 	}
@@ -339,7 +339,7 @@ func AuthenticateWithChallenge(ctx context.Context, req wbclientgo.UserValidateR
 
 	result := AuthenticateMSCHAPv2(ctx, wbclientgo.UserAuthReq{
 		Username:  req.Username,
-		Netbios:    req.Netbios,
+		Netbios:   req.Netbios,
 		Challenge: challenge,
 		Response:  ntResponse[:],
 	})
@@ -392,7 +392,7 @@ func AuthenticateWithPlainText(ctx context.Context, req wbclientgo.UserValidateR
 	errMsg := C.GoString(cErrorMsg)
 	ntStatus := uint32(outNTStatus)
 	if ntStatus != 0 {
-		result.ErrorMessage = fmt.Sprintf("%s: %s", ntStatusBaseError(ntStatus), errMsg)
+		result.ErrorMessage = fmt.Sprintf("%s: %v", ntStatusBaseError(ntStatus), errMsg)
 	} else {
 		result.ErrorMessage = errMsg
 	}
