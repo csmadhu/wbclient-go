@@ -25,21 +25,6 @@ package internal
 #define NT_LENGTH 24
 #define NT_DIGEST_LENGTH 16
 
-// Helper functions to extract data from wbcAuthUserInfo and wbcAuthErrorInfo
-static inline void copy_user_session_key(struct wbcAuthUserInfo *info, uint8_t *dest) {
-    if (info != NULL) {
-        memcpy(dest, info->user_session_key, NT_DIGEST_LENGTH);
-    }
-}
-
-static inline uint32_t get_nt_status(struct wbcAuthErrorInfo *error) {
-    return error ? error->nt_status : 0;
-}
-
-static inline const char* get_display_string(struct wbcAuthErrorInfo *error) {
-    return (error && error->display_string) ? error->display_string : NULL;
-}
-
 // Wrapper function for MSCHAPv2 authentication via winbind
 // Follows FreeRADIUS rlm_mschap implementation
 int go_wbc_auth_mschapv2(
@@ -50,7 +35,8 @@ int go_wbc_auth_mschapv2(
     int response_len,
     uint8_t *nthashhash,
     char *error_msg,
-    int error_msg_len
+    int error_msg_len,
+    uint32_t *out_nt_status
 ) {
     struct wbcAuthUserParams authparams;
     struct wbcAuthUserInfo *info = NULL;
@@ -96,6 +82,7 @@ int go_wbc_auth_mschapv2(
     err = wbcAuthenticateUserEx(&authparams, &info, &error);
 
     // Process the authentication result
+    *out_nt_status = 0;
     int rcode = -1;
     switch (err) {
     case WBC_ERR_SUCCESS:
@@ -116,6 +103,7 @@ int go_wbc_auth_mschapv2(
     case WBC_ERR_AUTH_ERROR:
         rcode = -1;
         if (error) {
+            *out_nt_status = error->nt_status;
             if (error->nt_status == NT_STATUS_PASSWORD_EXPIRED ||
                 error->nt_status == NT_STATUS_PASSWORD_MUST_CHANGE) {
                 rcode = -648;
@@ -156,6 +144,90 @@ int go_wbc_auth_mschapv2(
 
     return rcode;
 }
+
+// Wrapper function for plaintext authentication via winbind
+// Uses wbcAuthenticateUserEx to capture NT status error details
+int go_wbc_auth_plaintext(
+    const char *username,
+    const char *domain,
+    const char *password,
+    char *error_msg,
+    int error_msg_len,
+    uint32_t *out_nt_status
+) {
+    struct wbcAuthUserParams authparams;
+    struct wbcAuthUserInfo *info = NULL;
+    struct wbcAuthErrorInfo *error = NULL;
+    wbcErr err;
+
+    memset(&authparams, 0, sizeof(authparams));
+
+    authparams.account_name = (char *)username;
+    authparams.domain_name = (char *)domain;
+    authparams.workstation_name = NULL;
+    authparams.flags = 0;
+    authparams.level = WBC_AUTH_USER_LEVEL_PLAIN;
+    authparams.password.plaintext = (char *)password;
+
+    err = wbcAuthenticateUserEx(&authparams, &info, &error);
+
+    *out_nt_status = 0;
+    int rcode = -1;
+    switch (err) {
+    case WBC_ERR_SUCCESS:
+        rcode = 0;
+        break;
+
+    case WBC_ERR_WINBIND_NOT_AVAILABLE:
+        rcode = -2;
+        snprintf(error_msg, error_msg_len, "Winbind is not available");
+        break;
+
+    case WBC_ERR_DOMAIN_NOT_FOUND:
+        rcode = -1;
+        snprintf(error_msg, error_msg_len, "Domain not found");
+        break;
+
+    case WBC_ERR_AUTH_ERROR:
+        rcode = -1;
+        if (error) {
+            *out_nt_status = error->nt_status;
+            if (error->nt_status == NT_STATUS_PASSWORD_EXPIRED ||
+                error->nt_status == NT_STATUS_PASSWORD_MUST_CHANGE) {
+                rcode = -648;
+            }
+            if (error->display_string) {
+                snprintf(error_msg, error_msg_len, "%s [0x%X]",
+                        error->display_string, error->nt_status);
+            } else {
+                snprintf(error_msg, error_msg_len, "Authentication failed [0x%X]",
+                        error->nt_status);
+            }
+        } else {
+            snprintf(error_msg, error_msg_len, "Authentication failed");
+        }
+        break;
+
+    default:
+        rcode = -2;
+        if (error && error->display_string) {
+            snprintf(error_msg, error_msg_len, "libwbclient error: %s",
+                    error->display_string);
+        } else {
+            snprintf(error_msg, error_msg_len, "libwbclient error: %d", err);
+        }
+        break;
+    }
+
+    if (error) {
+        wbcFreeMemory(error);
+    }
+    if (info) {
+        wbcFreeMemory(info);
+    }
+
+    return rcode;
+}
 */
 import "C"
 
@@ -169,12 +241,6 @@ import (
 
 	wbclientgo "github.com/csmadhu/wbclient-go"
 	"github.com/csmadhu/wbclient-go/log"
-)
-
-const (
-	ntStatusPasswordExpired    = 0xC0000071
-	ntStatusPasswordMustChange = 0xC0000224
-	ntDigestLength             = 16
 )
 
 var wbThrottler = NewWinbindThrottler(envInt("WBCLIENT_MAX_CONCURRENT_AUTH", 400))
@@ -191,67 +257,12 @@ func envInt(key string, fallback int) int {
 	return n
 }
 
-func processWbcAuthError(err C.wbcErr, detailedErr *C.struct_wbcAuthErrorInfo) (result wbclientgo.UserAuthResp) {
-	switch err {
-	case C.WBC_ERR_SUCCESS:
-		result.Success = true
-		result.ErrorCode = 0
-		result.ErrorMessage = ""
-
-	case C.WBC_ERR_WINBIND_NOT_AVAILABLE:
-		result.Success = false
-		result.ErrorCode = -2
-		result.ErrorMessage = "Winbind is not available"
-
-	case C.WBC_ERR_DOMAIN_NOT_FOUND:
-		result.Success = false
-		result.ErrorCode = -1
-		result.ErrorMessage = "Domain not found"
-
-	case C.WBC_ERR_AUTH_ERROR:
-		result.Success = false
-		result.ErrorCode = -1
-		if detailedErr != nil {
-			ntStatus := uint32(C.get_nt_status(detailedErr))
-
-			if ntStatus == ntStatusPasswordExpired || ntStatus == ntStatusPasswordMustChange {
-				result.ErrorCode = -648
-			}
-
-			displayString := C.get_display_string(detailedErr)
-			if displayString != nil {
-				result.ErrorMessage = fmt.Sprintf("%s [0x%X]", C.GoString(displayString), ntStatus)
-			} else {
-				result.ErrorMessage = fmt.Sprintf("Authentication failed [0x%X]", ntStatus)
-			}
-		} else {
-			result.ErrorMessage = "Authentication failed"
-		}
-
-	default:
-		result.Success = false
-		result.ErrorCode = -2
-		if detailedErr != nil {
-			displayString := C.get_display_string(detailedErr)
-			if displayString != nil {
-				result.ErrorMessage = fmt.Sprintf("libwbclient error: %s", C.GoString(displayString))
-			} else {
-				result.ErrorMessage = fmt.Sprintf("libwbclient error: %d", int(err))
-			}
-		} else {
-			result.ErrorMessage = fmt.Sprintf("libwbclient error: %d", int(err))
-		}
-	}
-
-	return result
-}
-
 func AuthenticateMSCHAPv2(ctx context.Context, req wbclientgo.UserAuthReq) (result wbclientgo.UserAuthResp) {
 	t := time.Now()
-	log.WithCtx(ctx).Printf("wbclient - authenticate mschapv2: username:%s domain:%s challenge:%x response:%x", req.Username, req.Domain,
+	log.WithCtx(ctx).Printf("wbclient - authenticate mschapv2: username:%s domain:%s challenge:%x response:%x", req.Username, req.Netbios,
 		req.Challenge, req.Response)
 
-	if req.Username == "" || req.Domain == "" {
+	if req.Username == "" || req.Netbios == "" {
 		result.ErrorMessage = "Username and domain required"
 		result.ErrorCode = -1
 		return result
@@ -265,7 +276,7 @@ func AuthenticateMSCHAPv2(ctx context.Context, req wbclientgo.UserAuthReq) (resu
 	defer wbThrottler.Release()
 
 	cUsername := C.CString(req.Username)
-	cDomain := C.CString(req.Domain)
+	cDomain := C.CString(req.Netbios)
 	defer C.free(unsafe.Pointer(cUsername))
 	defer C.free(unsafe.Pointer(cDomain))
 
@@ -279,15 +290,24 @@ func AuthenticateMSCHAPv2(ctx context.Context, req wbclientgo.UserAuthReq) (resu
 	var ntHashHash [16]byte
 	cNTHashHash := (*C.uint8_t)(unsafe.Pointer(&ntHashHash[0]))
 
+	var outNTStatus C.uint32_t
+
 	rcode := int(C.go_wbc_auth_mschapv2(
 		cUsername, cDomain, cChallenge, cResponse, cResponseLen,
-		cNTHashHash, cErrorMsg, 256,
+		cNTHashHash, cErrorMsg, 256, &outNTStatus,
 	))
 
 	result.ErrorCode = rcode
 	result.NTHashHash = ntHashHash
-	result.ErrorMessage = C.GoString(cErrorMsg)
 	result.Success = (rcode == 0)
+
+	errMsg := C.GoString(cErrorMsg)
+	ntStatus := uint32(outNTStatus)
+	if ntStatus != 0 {
+		result.ErrorMessage = fmt.Sprintf("%s: %s", ntStatusBaseError(ntStatus), errMsg)
+	} else {
+		result.ErrorMessage = errMsg
+	}
 
 	log.WithCtx(ctx).Printf("wbclient - authenticate mschapv2 completed: result:%+v duration:%v", result, time.Since(t))
 	return result
@@ -304,7 +324,7 @@ func AuthenticateWithChallenge(ctx context.Context, req wbclientgo.UserValidateR
 		return result
 	}
 
-	log.WithCtx(ctx).Printf("wbclient - authenticate with challenge: username[%s] domain[%s]", req.Username, req.Domain)
+	log.WithCtx(ctx).Printf("wbclient - authenticate with challenge: username[%s] domain[%s]", req.Username, req.Netbios)
 
 	challenge, err := GenerateRandomChallenge()
 	if err != nil {
@@ -319,7 +339,7 @@ func AuthenticateWithChallenge(ctx context.Context, req wbclientgo.UserValidateR
 
 	result := AuthenticateMSCHAPv2(ctx, wbclientgo.UserAuthReq{
 		Username:  req.Username,
-		Domain:    req.Domain,
+		Netbios:    req.Netbios,
 		Challenge: challenge,
 		Response:  ntResponse[:],
 	})
@@ -338,7 +358,7 @@ func AuthenticateWithPlainText(ctx context.Context, req wbclientgo.UserValidateR
 		return result
 	}
 
-	log.WithCtx(ctx).Printf("wbclient - plaintext auth: username[%s] domain[%s]", req.Username, req.Domain)
+	log.WithCtx(ctx).Printf("wbclient - plaintext auth: username[%s] domain[%s]", req.Username, req.Netbios)
 
 	if err := wbThrottler.Acquire(ctx); err != nil {
 		return wbclientgo.UserAuthResp{
@@ -350,13 +370,32 @@ func AuthenticateWithPlainText(ctx context.Context, req wbclientgo.UserValidateR
 	defer wbThrottler.Release()
 
 	cUsername := C.CString(req.Username)
+	cDomain := C.CString(req.Netbios)
 	cPassword := C.CString(req.Password)
 	defer C.free(unsafe.Pointer(cUsername))
+	defer C.free(unsafe.Pointer(cDomain))
 	defer C.free(unsafe.Pointer(cPassword))
 
-	err := C.wbcAuthenticateUser(cUsername, cPassword)
+	errorBuf := make([]byte, 256)
+	cErrorMsg := (*C.char)(unsafe.Pointer(&errorBuf[0]))
+	var outNTStatus C.uint32_t
 
-	result := processWbcAuthError(err, nil)
+	rcode := int(C.go_wbc_auth_plaintext(
+		cUsername, cDomain, cPassword, cErrorMsg, 256, &outNTStatus,
+	))
+
+	result := wbclientgo.UserAuthResp{
+		ErrorCode: rcode,
+		Success:   rcode == 0,
+	}
+
+	errMsg := C.GoString(cErrorMsg)
+	ntStatus := uint32(outNTStatus)
+	if ntStatus != 0 {
+		result.ErrorMessage = fmt.Sprintf("%s: %s", ntStatusBaseError(ntStatus), errMsg)
+	} else {
+		result.ErrorMessage = errMsg
+	}
 
 	if result.Success {
 		log.WithCtx(ctx).Printf("wbclient - plaintext auth succeeded for username[%s]", req.Username)

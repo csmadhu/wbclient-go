@@ -13,14 +13,14 @@ const (
 type UserValidateReq struct {
 	Username        string `json:"username"`
 	Password        string `json:"password"`
-	Domain          string `json:"domain"`
+	Netbios         string `json:"netbios"`
 	IsPlainTextAuth bool   `json:"isPlainTextAuth"`
 }
 
 // UserAuthReq represents the request for MSCHAPv2 authentication
 type UserAuthReq struct {
 	Username  string  `json:"username"`
-	Domain    string  `json:"domain"`
+	Netbios   string  `json:"netbios"`
 	Challenge [8]byte `json:"challenge"`
 	Response  []byte  `json:"response"`
 }

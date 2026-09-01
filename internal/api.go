@@ -101,7 +101,7 @@ func apiUserValidate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.Username == "" || req.Password == "" || req.Domain == "" {
+	if req.Username == "" || req.Password == "" || req.Netbios == "" {
 		log.WithCtx(ctx).Errorf("wbclient(usertest) - missing required fields")
 		w.WriteHeader(http.StatusBadRequest)
 		resp := wbclientgo.UserAuthResp{

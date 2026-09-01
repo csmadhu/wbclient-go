@@ -24,7 +24,7 @@ func TestAuthWithPlainText(t *testing.T) {
 		req := wbclientgo.UserValidateReq{
 			Username:        username,
 			Password:        password,
-			Domain:          domain,
+			Netbios:          domain,
 			IsPlainTextAuth: true,
 		}
 
@@ -44,7 +44,7 @@ func TestAuthWithPlainText(t *testing.T) {
 		req := wbclientgo.UserValidateReq{
 			Username:        username,
 			Password:        fmt.Sprintf("wrong%s", password),
-			Domain:          domain,
+			Netbios:          domain,
 			IsPlainTextAuth: true,
 		}
 
@@ -67,7 +67,7 @@ func TestAuthWithPlainText(t *testing.T) {
 		req := wbclientgo.UserValidateReq{
 			Username:        fmt.Sprintf("wrong%s", username),
 			Password:        password,
-			Domain:          domain,
+			Netbios:          domain,
 			IsPlainTextAuth: true,
 		}
 
@@ -102,7 +102,7 @@ func TestAuthWithChallenge(t *testing.T) {
 		req := wbclientgo.UserValidateReq{
 			Username:        username,
 			Password:        password,
-			Domain:          domain,
+			Netbios:          domain,
 			IsPlainTextAuth: false,
 		}
 
@@ -122,7 +122,7 @@ func TestAuthWithChallenge(t *testing.T) {
 		req := wbclientgo.UserValidateReq{
 			Username:        username,
 			Password:        "WrongPassword123!",
-			Domain:          domain,
+			Netbios:          domain,
 			IsPlainTextAuth: false,
 		}
 
@@ -145,7 +145,7 @@ func TestAuthWithChallenge(t *testing.T) {
 		req := wbclientgo.UserValidateReq{
 			Username:        "nonexistentuser",
 			Password:        password,
-			Domain:          domain,
+			Netbios:          domain,
 			IsPlainTextAuth: false,
 		}
 
